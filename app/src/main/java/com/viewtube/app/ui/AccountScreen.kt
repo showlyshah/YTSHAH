@@ -1,5 +1,7 @@
 package com.viewtube.app.ui
 
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -162,6 +164,18 @@ fun AccountScreen(onBack: () -> Unit) {
                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             OutlinedButton(onClick = { confirmWipe = true }) { Text("Delete all my data from this phone") }
+        }
+
+        Section("Help improve ViewTube") {
+            Text(
+                "Something not working? Tell us. YouTube changes often, and reports are how fixes get made.",
+                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            OutlinedButton(onClick = {
+                ctx.startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/showlyshah/YTSHAH/issues/new?template=bug_report.yml&labels=bug"))
+                )
+            }) { Text("Report a bug") }
         }
 
         status?.let { Text(it, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.primary) }
