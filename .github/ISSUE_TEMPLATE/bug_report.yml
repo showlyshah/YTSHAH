@@ -1,0 +1,28 @@
+name: Bug report
+description: Something in ViewTube isn't working
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What went wrong?
+      description: For example "videos stay on a black screen" or "search shows no results".
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: What did you do just before it happened?
+  - type: input
+    id: device
+    attributes:
+      label: Phone and Android version
+      placeholder: "Pixel 7, Android 15"
+  - type: dropdown
+    id: before
+    attributes:
+      label: Did this work before?
+      options:
+        - Yes, it used to work
+        - No, never worked
+        - Not sure
