@@ -8,6 +8,8 @@ data class AiRequest(
     val prompt: String,
     val videoTitle: String? = null,
     val sourceText: String? = null,
+    /** Must be explicitly enabled by the user for each request that may leave the device. */
+    val allowCloud: Boolean = false,
 )
 
 data class AiResponse(
@@ -37,10 +39,13 @@ class HybridAiCoordinator(
     private val cloudEnabled: () -> Boolean = { false },
 ) {
     suspend fun execute(request: AiRequest): AiResponse? {
-        val localResult = runCatching { local.execute(request) }.getOrNull()
-        if (localResult != null) return localResult
-        if (!cloudEnabled()) return null
-        val provider = cloudProvider() ?: return null
-        return runCatching { provider.execute(request) }.getOrNull()
+        if (request.allowCloud && cloudEnabled()) {
+            val provider = cloudProvider()
+            if (provider != null) {
+                val cloudResult = runCatching { provider.execute(request) }.getOrNull()
+                if (cloudResult != null) return cloudResult
+            }
+        }
+        return runCatching { local.execute(request) }.getOrNull()
     }
 }
