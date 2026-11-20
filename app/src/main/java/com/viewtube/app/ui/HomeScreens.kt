@@ -34,6 +34,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -81,32 +83,100 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     val subs by Graph.store.subs.collectAsStateCompat()
     val personalized by Graph.store.personalizedRecommendations.collectAsStateCompat()
+    val subIds = subs.map { it.id }
+    val listState = rememberLazyListState()
     var videos by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
+    var loadingMore by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
+    var hasMore by remember { mutableStateOf(true) }
+    var loadMoreFailed by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
+    var mixer by remember { mutableStateOf<com.viewtube.app.data.FeedMixer?>(null) }
 
-    LaunchedEffect(reload, subs.size, personalized) {
+    LaunchedEffect(reload, subIds, personalized) {
+        loading = true
+        loadingMore = false
+        loadMoreFailed = false
         error = null
-        if (videos.isEmpty()) loading = true
-        runCatching {
-            val trending = Graph.repo.trending()
-            val fromSubs = if (subs.isEmpty()) emptyList() else Graph.repo.feed(subs.map { it.id }, 3).take(20)
-            (fromSubs + trending).distinctBy { it.id }
-        }.onSuccess { videos = if (personalized) LocalRecommendationEngine.rank(it, Graph.store.history.value, subs) else it }.onFailure { if (videos.isEmpty()) error = errorText(it) }
+        videos = emptyList()
+        listState.scrollToItem(0)
+        val nextMixer = com.viewtube.app.data.FeedMixer(
+            topics = listOf("popular videos", "music", "technology", "gaming", "science", "news", "education"),
+            repo = Graph.repo,
+            accept = { !it.isShort },
+        )
+        mixer = nextMixer
+        val trending = runCatching { Graph.repo.trending() }.getOrDefault(emptyList())
+        val fromSubs = if (subIds.isEmpty()) emptyList() else
+            runCatching { Graph.repo.feed(subIds, 3).take(24) }.getOrDefault(emptyList())
+        val discovery = runCatching { nextMixer.more(18) }.getOrDefault(emptyList())
+        val initial = (fromSubs + trending + discovery).distinctBy { it.id }
+        videos = if (personalized) LocalRecommendationEngine.rank(initial, Graph.store.history.value, subs) else initial
+        hasMore = !nextMixer.exhausted
+        if (videos.isEmpty()) error = "The feed sources did not return videos. Check your connection and try again."
         loading = false
         refreshing = false
     }
 
+    fun loadNextPage() {
+        if (loading || loadingMore || !hasMore) return
+        val activeMixer = mixer ?: return
+        scope.launch {
+            loadingMore = true
+            loadMoreFailed = false
+            val result = runCatching { activeMixer.more(14) }
+            result.onSuccess { page ->
+                if (page.isNotEmpty()) {
+                    val known = videos.mapTo(HashSet()) { it.id }
+                    val merged = videos + page.filter { known.add(it.id) }
+                    videos = if (personalized) LocalRecommendationEngine.rank(merged, Graph.store.history.value, subs) else merged
+                } else if (!activeMixer.exhausted) {
+                    // Keep the continuation alive and expose a manual retry instead of ending the feed.
+                    loadMoreFailed = true
+                }
+                hasMore = !activeMixer.exhausted
+            }.onFailure {
+                loadMoreFailed = true
+                error = errorText(it)
+            }
+            loadingMore = false
+        }
+    }
+
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            val info = listState.layoutInfo
+            val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: -1
+            info.totalItemsCount > 0 && lastVisible >= info.totalItemsCount - 5
+        }.distinctUntilChanged().collect { nearEnd ->
+            if (nearEnd) loadNextPage()
+        }
+    }
+
     Column(Modifier.fillMaxSize()) {
         TopBar(onSearch, onAccount)
-        PullToRefreshBox(isRefreshing = refreshing, onRefresh = { refreshing = true; reload++ }, modifier = Modifier.fillMaxSize()) {
+        PullToRefreshBox(
+            isRefreshing = refreshing,
+            onRefresh = { if (!refreshing) { refreshing = true; reload++ } },
+            modifier = Modifier.fillMaxSize()
+        ) {
             when {
                 loading -> Loading()
-                error != null -> Message("Couldn't load videos", error, "Try again") { reload++ }
-                else -> LazyColumn(Modifier.fillMaxSize()) {
+                error != null && videos.isEmpty() -> Message("Couldn't load videos", error, "Try again") { reload++ }
+                else -> LazyColumn(Modifier.fillMaxSize(), state = listState) {
                     items(videos, key = { it.id }) { v -> VideoCard(v, { onVideo(v) }, onChannel) }
+                    if (loadingMore) item(key = "home-loading") { Loading(Modifier.fillMaxWidth().height(72.dp)) }
+                    if (loadMoreFailed && hasMore) item(key = "home-retry") {
+                        Message("More videos couldn't load", "Your feed position is saved. Try loading the next page again.", "Retry") {
+                            loadNextPage()
+                        }
+                    }
+                    if (!hasMore && videos.isNotEmpty()) item(key = "home-end") {
+                        Text("You're up to date. Pull down to refresh.", modifier = Modifier.fillMaxWidth().padding(20.dp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
         }
