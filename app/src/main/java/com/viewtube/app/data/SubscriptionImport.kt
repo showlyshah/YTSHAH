@@ -14,7 +14,7 @@ import org.json.JSONObject
 object SubscriptionImport {
 
     fun parse(raw: String): List<ChannelItem> {
-        val text = raw.trimStart('﻿').trim()
+        val text = raw.trimStart('\uFEFF').trim()
         val channels = when {
             text.startsWith("{") -> fromNewPipe(JSONObject(text))
             text.startsWith("[") -> fromTakeoutJson(JSONArray(text))
