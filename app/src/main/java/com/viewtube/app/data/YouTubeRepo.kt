@@ -235,7 +235,7 @@ class YouTubeRepo(private val http: OkHttpClient) {
         while (ev != XmlPullParser.END_DOCUMENT && out.size < limit) {
             if (ev == XmlPullParser.START_TAG) {
                 when (p.name) {
-                    "entry" -> { inEntry = true; id = null; title = ""; published = 0; thumb = null; views = -1 }
+                    "entry" -> { inEntry = true; inAuthor = false; id = null; title = ""; author = ""; published = 0; thumb = null; views = -1 }
                     "author" -> inAuthor = true
                     "yt:videoId" -> if (inEntry) id = p.nextText()
                     "title" -> if (inEntry) title = p.nextText()
