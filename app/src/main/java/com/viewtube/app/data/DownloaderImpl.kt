@@ -25,9 +25,13 @@ class DownloaderImpl(private val client: OkHttpClient) : Downloader() {
             .header("User-Agent", USER_AGENT)
 
         request.headers().forEach { (name, values) ->
-            builder.removeHeader(name)
-            values.forEach { builder.addHeader(name, it) }
+            if (!name.equals("User-Agent", ignoreCase = true)) {
+                builder.removeHeader(name)
+                values.forEach { builder.addHeader(name, it) }
+            }
         }
+        // Identify this app honestly rather than impersonating a browser or official client.
+        builder.header("User-Agent", USER_AGENT)
 
         client.newCall(builder.build()).execute().use { resp ->
             if (resp.code == 429) {
@@ -44,6 +48,6 @@ class DownloaderImpl(private val client: OkHttpClient) : Downloader() {
     }
 
     companion object {
-        const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; rv:128.0) Gecko/20100101 Firefox/128.0"
+        const val USER_AGENT = "ViewTube/1.0 (Android)"
     }
 }
