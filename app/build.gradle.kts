@@ -43,6 +43,7 @@ android {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.3")
 
     // YouTube data without Google's player or ads (same library NewPipe uses).
