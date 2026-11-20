@@ -4,9 +4,14 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.res.Configuration
+import android.media.AudioManager
+import android.hardware.display.DisplayManager
+import android.view.Display
 import kotlin.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,16 +21,23 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Switch
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -43,9 +55,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -60,6 +74,8 @@ import com.viewtube.app.data.Comment
 import com.viewtube.app.data.Graph
 import com.viewtube.app.data.Paged
 import com.viewtube.app.data.VideoDetails
+import com.viewtube.app.data.SubtitleTrack
+import com.viewtube.app.data.OnDeviceSubtitleTranslator
 import com.viewtube.app.data.errorText
 import com.viewtube.app.data.watchUrl
 import com.viewtube.app.player.PlayerHolder
@@ -83,34 +99,61 @@ fun WatchScreen(
     onChannel: (String) -> Unit,
 ) {
     val ctx = LocalContext.current
+    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    var fullscreen by remember { mutableStateOf(false) }
+    val immersivePlayer = fullscreen || landscape
+    val hdrDisplaySupported = remember(ctx) {
+        runCatching {
+            val dm = ctx.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+            dm.getDisplay(Display.DEFAULT_DISPLAY)?.hdrCapabilities?.supportedHdrTypes?.isNotEmpty() == true
+        }.getOrDefault(false)
+    }
     val scope = rememberCoroutineScope()
     var details by remember { mutableStateOf<VideoDetails?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var attempt by remember { mutableStateOf(0) }
-    var fullscreen by remember { mutableStateOf(false) }
     var comments by remember { mutableStateOf<Paged<Comment>?>(null) }
     var commentList by remember { mutableStateOf<List<Comment>>(emptyList()) }
     var loadingComments by remember { mutableStateOf(false) }
     var showDesc by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf(false) }
+    var queueSheet by remember { mutableStateOf(false) }
+    var aiSheet by remember { mutableStateOf(false) }
+    var aiBusy by remember { mutableStateOf(false) }
+    var aiText by remember { mutableStateOf<String?>(null) }
+    var aiQuestion by remember { mutableStateOf("") }
+    var useCloudForAi by remember { mutableStateOf(false) }
+    var gestureFeedback by remember { mutableStateOf<String?>(null) }
+    var translationEnabled by remember { mutableStateOf(false) }
+    var selectedSubtitleTrack by remember { mutableStateOf<SubtitleTrack?>(null) }
+    var translationTarget by remember { mutableStateOf(java.util.Locale.getDefault().language.takeIf { it in setOf("en", "ml", "hi", "ta", "te", "ar", "fr", "es") } ?: "en") }
+    var translatedCaption by remember { mutableStateOf<String?>(null) }
+    var translationError by remember { mutableStateOf<String?>(null) }
     val audioSel by PlayerHolder.audioTrack.collectAsStateCompat()
     val speed by PlayerHolder.speed.collectAsStateCompat()
+    val looping by PlayerHolder.looping.collectAsStateCompat()
+    val repeatMode by PlayerHolder.repeatMode.collectAsStateCompat()
+    val sleepRemaining by PlayerHolder.sleepRemainingMs.collectAsStateCompat()
+    val audioOnly by PlayerHolder.audioOnly.collectAsStateCompat()
     val prefHeight by Graph.store.preferredHeight.collectAsStateCompat()
+    val prefAudioBitrate by Graph.store.preferredAudioBitrate.collectAsStateCompat()
     val height by PlayerHolder.height.collectAsStateCompat()
     val notice by PlayerHolder.skipNotice.collectAsStateCompat()
     val subs by Graph.store.subs.collectAsStateCompat()
     val later by Graph.store.later.collectAsStateCompat()
+    val queue by Graph.store.queue.collectAsStateCompat()
 
     LaunchedEffect(videoId, attempt) {
         error = null
         comments = null; commentList = emptyList(); showDesc = false
         // Re-opening the video that is already playing (from the mini player): keep it going.
         val cur = PlayerHolder.current.value
-        if (cur != null && cur.video.id == videoId) { details = cur; return@LaunchedEffect }
+        if (cur != null && cur.video.id == videoId) { details = cur; selectedSubtitleTrack = cur.subtitles.firstOrNull(); return@LaunchedEffect }
         details = null
         runCatching { Graph.repo.details(videoId) }
             .onSuccess { d ->
                 details = d
+                selectedSubtitleTrack = d.subtitles.firstOrNull()
                 Graph.store.addHistory(d.video)
                 runCatching { PlayerHolder.play(d, startMs = Graph.store.positionOf(videoId)) }
                     .onFailure { error = errorText(it) }
@@ -123,19 +166,53 @@ fun WatchScreen(
         PlayerHolder.advanced.collect { id -> if (id != videoId) onVideo(id) }
     }
 
+    LaunchedEffect(videoId, translationEnabled, selectedSubtitleTrack, translationTarget) {
+        translatedCaption = null
+        translationError = null
+        val track = selectedSubtitleTrack
+        if (!translationEnabled || track == null) return@LaunchedEffect
+        var translator: OnDeviceSubtitleTranslator? = null
+        try {
+            val cues = Graph.repo.subtitleCues(track)
+            val activeTranslator = OnDeviceSubtitleTranslator.create(track.languageTag, translationTarget)
+            translator = activeTranslator
+            var previousText: String? = null
+            while (true) {
+                val position = PlayerHolder.player.currentPosition
+                val sourceText = cues.firstOrNull { position >= it.startMs && position < it.endMs }?.text
+                if (sourceText != previousText) {
+                    previousText = sourceText
+                    translatedCaption = if (sourceText.isNullOrBlank()) null else activeTranslator.translate(sourceText)
+                }
+                kotlinx.coroutines.delay(180)
+            }
+        } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            translationError = error.message ?: "Translation is unavailable for this subtitle track."
+            translatedCaption = null
+        } finally {
+            translator?.close()
+        }
+    }
+
+    LaunchedEffect(gestureFeedback) {
+        if (gestureFeedback != null) {
+            kotlinx.coroutines.delay(1200)
+            gestureFeedback = null
+        }
+    }
+
     // Fullscreen = landscape + hidden system bars.
-    DisposableEffect(fullscreen) {
+    DisposableEffect(immersivePlayer, fullscreen) {
         val act = ctx.activity()
         if (act != null) {
             val ctl = WindowInsetsControllerCompat(act.window, act.window.decorView)
-            if (fullscreen) {
-                act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            if (fullscreen) act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            else if (!landscape) act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            if (immersivePlayer) {
                 ctl.hide(WindowInsetsCompat.Type.systemBars())
                 ctl.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            } else {
-                act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-                ctl.show(WindowInsetsCompat.Type.systemBars())
-            }
+            } else ctl.show(WindowInsetsCompat.Type.systemBars())
         }
         onDispose {
             ctx.activity()?.let {
@@ -147,21 +224,96 @@ fun WatchScreen(
     androidx.activity.compose.BackHandler(enabled = fullscreen) { fullscreen = false }
 
     val playerBox: @Composable (Modifier) -> Unit = { mod ->
-        Box(mod.background(Color.Black)) {
+        Box(mod.background(Color.Black).pointerInput(fullscreen) {
+            var drag = 0f
+            detectVerticalDragGestures(onVerticalDrag = { _, amount ->
+                drag += amount
+                if (immersivePlayer && drag > 70f) { onBack(); drag = 0f }
+            }, onDragEnd = { drag = 0f })
+        }) {
             AndroidView(
                 factory = { c ->
                     PlayerView(c).apply {
                         player = PlayerHolder.player
                         resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                        setShowSubtitleButton(false)
+                        setShowSubtitleButton(true)
                         setFullscreenButtonClickListener { fullscreen = it }
                     }
                 },
                 update = { it.player = PlayerHolder.player },
                 modifier = Modifier.fillMaxSize()
             )
-            if (!fullscreen) IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart)) {
+            if (!immersivePlayer) IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart)) {
                 Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Minimize", tint = Color.White)
+            }
+            Row(Modifier.align(Alignment.TopEnd).padding(3.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { sheet = true }, modifier = Modifier.size(38.dp)) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "Player options", tint = Color.White, modifier = Modifier.size(19.dp))
+                }
+                IconButton(onClick = {
+                    if (immersivePlayer) {
+                        fullscreen = false
+                        ctx.activity()?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                    } else fullscreen = true
+                }, modifier = Modifier.size(38.dp)) {
+                    Icon(if (immersivePlayer) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                        contentDescription = if (immersivePlayer) "Exit fullscreen" else "Fullscreen",
+                        tint = Color.White, modifier = Modifier.size(20.dp))
+                }
+            }
+            Box(
+                Modifier.align(Alignment.CenterStart).fillMaxWidth(0.18f).fillMaxSize()
+                    .pointerInput(videoId) {
+                        var accumulated = 0f
+                        detectVerticalDragGestures { _, amount ->
+                            accumulated += amount
+                            if (kotlin.math.abs(accumulated) >= 28f) {
+                                ctx.activity()?.let { activity ->
+                                    val params = activity.window.attributes
+                                    val old = params.screenBrightness.takeIf { it >= 0f } ?: 0.5f
+                                    params.screenBrightness = (old - accumulated / 500f).coerceIn(0.05f, 1f)
+                                    activity.window.attributes = params
+                                    gestureFeedback = "Brightness ${(params.screenBrightness * 100).toInt()}%"
+                                }
+                                accumulated = 0f
+                            }
+                        }
+                    }
+            )
+            Box(
+                Modifier.align(Alignment.CenterEnd).fillMaxWidth(0.18f).fillMaxSize()
+                    .pointerInput(videoId) {
+                        var accumulated = 0f
+                        detectVerticalDragGestures { _, amount ->
+                            accumulated += amount
+                            if (kotlin.math.abs(accumulated) >= 28f) {
+                                val audio = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                                audio.adjustStreamVolume(
+                                    AudioManager.STREAM_MUSIC,
+                                    if (accumulated < 0) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER,
+                                    0
+                                )
+                                gestureFeedback = "Volume ${audio.getStreamVolume(AudioManager.STREAM_MUSIC) * 100 / audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)}%"
+                                accumulated = 0f
+                            }
+                        }
+                    }
+            )
+            gestureFeedback?.let {
+                Text(
+                    it, color = Color.White, fontSize = 13.sp,
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp)
+                        .clip(RoundedCornerShape(16.dp)).background(Color(0xCC000000))
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+            }
+            translatedCaption?.let { caption ->
+                Text(
+                    caption, color = Color.White, fontSize = 12.sp, lineHeight = 15.sp, fontWeight = FontWeight.Normal,
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(horizontal = 22.dp, vertical = 58.dp)
+                        .clip(RoundedCornerShape(10.dp)).background(Color(0xD9000000))
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                )
             }
             notice?.let {
                 Text(
@@ -173,12 +325,10 @@ fun WatchScreen(
         }
     }
 
-    if (fullscreen) {
+    if (immersivePlayer) {
         playerBox(Modifier.fillMaxSize())
-        return
-    }
-
-    Column(Modifier.fillMaxSize()) {
+    } else {
+        Column(Modifier.fillMaxSize()) {
         playerBox(Modifier.fillMaxWidth().aspectRatio(16f / 9f))
         val d = details
         when {
@@ -225,7 +375,23 @@ fun WatchScreen(
                             Spacer(Modifier.width(8.dp))
                             if (!d.isLive) AssistChip(
                                 onClick = { sheet = true },
-                                label = { Text(if (height > 0) "${height}p" else "Quality") }
+                                label = { Text(if (height > 0) "${height}p" else "Quality · Speed") }
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            AssistChip(onClick = { queueSheet = true }, label = { Text("Queue ${queue.size}") })
+                            Spacer(Modifier.width(8.dp))
+                            AssistChip(onClick = { aiSheet = true; aiText = null }, label = { Text("AI insights") })
+                        }
+
+                        Row(Modifier.padding(top = 4.dp)) {
+                            AssistChip(
+                                onClick = { PlayerHolder.setAudioOnly(!audioOnly) },
+                                label = { Text(if (audioOnly) "Audio only: On" else "Audio only") }
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            AssistChip(
+                                onClick = { PlayerHolder.setLooping(!looping) },
+                                label = { Text(if (looping) "Loop: On" else "Loop video") }
                             )
                         }
                     }
@@ -255,9 +421,18 @@ fun WatchScreen(
                 }
 
                 item { Text("Up next", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(12.dp)) }
-                items(d.related, key = { it.id }) { v -> VideoRow(v) { onVideo(v.id) } }
+                items(d.related, key = { it.id }) { v ->
+                    Column(Modifier.fillMaxWidth()) {
+                        VideoRow(v) { onVideo(v.id) }
+                        OutlinedButton(
+                            onClick = { Graph.store.enqueue(v) },
+                            modifier = Modifier.padding(start = 12.dp, bottom = 10.dp)
+                        ) { Text(if (queue.any { it.id == v.id }) "Move to end of queue" else "Add to queue") }
+                    }
+                }
             }
         }
+    }
     }
     val dd = details
     if (sheet && dd != null) ModalBottomSheet(onDismissRequest = { sheet = false }) {
@@ -269,10 +444,25 @@ fun WatchScreen(
                 runCatching { PlayerHolder.play(dd, PlayerHolder.defaultHeight(dd)) }.onFailure { error = errorText(it) }
                 sheet = false
             }
+            SheetRow("Max available", prefHeight == -1) {
+                Graph.store.setPreferredHeight(-1)
+                runCatching { PlayerHolder.play(dd, PlayerHolder.defaultHeight(dd)) }.onFailure { error = errorText(it) }
+                sheet = false
+            }
             heights.forEach { h ->
-                SheetRow("${h}p", height == h && prefHeight != 0) {
+                SheetRow("${h}p", height == h && prefHeight == h) {
                     Graph.store.setPreferredHeight(h)
                     runCatching { PlayerHolder.play(dd, h) }.onFailure { error = errorText(it) }
+                    sheet = false
+                }
+            }
+            SheetTitle("Audio quality")
+            listOf(0, 320000, 256000, 192000, 128000).forEach { bitrate ->
+                SheetRow(if (bitrate == 0) "Highest available" else "$bitrate kbps or nearest available", prefAudioBitrate == bitrate) {
+                    Graph.store.setPreferredAudioBitrate(bitrate)
+                    runCatching {
+                        PlayerHolder.play(dd, height.takeIf { it > 0 } ?: PlayerHolder.defaultHeight(dd), audioTrackId = audioSel)
+                    }.onFailure { error = errorText(it) }
                     sheet = false
                 }
             }
@@ -287,12 +477,160 @@ fun WatchScreen(
                     }
                 }
             }
+            SheetTitle("Live subtitle translation")
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Translate captions", fontWeight = FontWeight.Medium)
+                    Text("On-device translation · captions required", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(checked = translationEnabled, onCheckedChange = { translationEnabled = it })
+            }
+            if (dd.subtitles.isEmpty()) {
+                Text("No subtitle tracks are available for this video.", modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                SheetTitle("Caption language")
+                dd.subtitles.take(12).forEach { track ->
+                    SheetRow(track.languageName + if (track.autoGenerated) " · auto" else "",
+                        selectedSubtitleTrack?.url == track.url) {
+                        selectedSubtitleTrack = track
+                    }
+                }
+                SheetTitle("Translate into")
+                listOf("en" to "English", "ml" to "Malayalam", "hi" to "Hindi", "ta" to "Tamil",
+                    "te" to "Telugu", "ar" to "Arabic", "fr" to "French", "es" to "Spanish").forEach { (code, label) ->
+                    SheetRow(label, translationTarget == code) { translationTarget = code }
+                }
+            }
+            translationError?.let {
+                Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
+            }
+            SheetTitle("Playback mode")
+            listOf("off" to "Play one", "one" to "Repeat one", "continuous" to "Play continuously").forEach { (mode, label) ->
+                SheetRow(label, repeatMode == mode) { PlayerHolder.setRepeatMode(mode) }
+            }
+            SheetTitle("Sleep timer")
+            val remainingMinutes = sleepRemaining?.let { (it / 60000L).toInt().coerceAtLeast(1) }
+            Text(if (remainingMinutes != null) "Stops playback in about $remainingMinutes min" else "No sleep timer set",
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            listOf(15, 30, 45, 60, 90).forEach { mins ->
+                SheetRow("$mins minutes", remainingMinutes == mins) { PlayerHolder.setSleepTimer(mins) }
+            }
+            if (sleepRemaining != null) SheetRow("Cancel sleep timer", false) { PlayerHolder.cancelSleepTimer() }
+            if (hdrDisplaySupported) {
+                SheetTitle("HDR")
+                Text("HDR display detected. HDR playback is enabled automatically when the source provides a compatible HDR stream; SDR streams remain SDR.",
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp), fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             SheetTitle("Playback speed")
             listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f).forEach { sp ->
                 SheetRow(if (sp == 1f) "Normal" else "${sp}x", speed == sp) { PlayerHolder.setSpeed(sp); sheet = false }
             }
         }
     }
+    if (queueSheet) ModalBottomSheet(onDismissRequest = { queueSheet = false }) {
+        Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Play-next queue (${queue.size})", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                if (queue.isNotEmpty()) Text(
+                    "Clear",
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.clickable { Graph.store.clearQueue() }.padding(8.dp)
+                )
+            }
+            if (queue.isEmpty()) {
+                Text("Your queue is empty. Add videos from the Up next list.", modifier = Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                LazyColumn(Modifier.height(420.dp)) {
+                    items(queue, key = { it.id }) { item ->
+                        Column {
+                            VideoRow(item) { queueSheet = false; onVideo(item.id) }
+                            OutlinedButton(
+                                onClick = { Graph.store.removeFromQueue(item.id) },
+                                modifier = Modifier.padding(start = 12.dp, bottom = 8.dp)
+                            ) { Text("Remove from queue") }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (aiSheet && dd != null) ModalBottomSheet(onDismissRequest = { aiSheet = false }) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
+            Text("Video intelligence", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+            Text(
+                "Analysis uses the video description available to ViewTube, not a guaranteed full transcript. " +
+                    "Cloud processing is optional and requires both the global setting and your approval here.",
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 6.dp, bottom = 10.dp)
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Allow cloud for this request", modifier = Modifier.weight(1f))
+                Switch(checked = useCloudForAi, onCheckedChange = { useCloudForAi = it })
+            }
+            OutlinedButton(
+                enabled = !aiBusy,
+                onClick = {
+                    scope.launch {
+                        aiBusy = true
+                        aiText = runCatching {
+                            Graph.ai.execute(com.viewtube.app.data.AiRequest(
+                                task = com.viewtube.app.data.AiTask.VIDEO_SUMMARY,
+                                prompt = "Summarize the main points in this video's available description.",
+                                videoTitle = dd.video.title,
+                                sourceText = dd.description,
+                                allowCloud = useCloudForAi && Graph.store.cloudAiEnabled.value
+                            ))?.let { "${it.text}\\n\\nSource: ${it.provider}" }
+                                ?: "There isn't enough description text to summarize."
+                        }.getOrElse { "AI request failed: ${it.message}" }
+                        aiBusy = false
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text(if (aiBusy) "Analysing..." else "Summarize video") }
+            OutlinedTextField(
+                value = aiQuestion,
+                onValueChange = { aiQuestion = it },
+                label = { Text("Ask a question about this video") },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !aiBusy
+            )
+            OutlinedButton(
+                enabled = !aiBusy && aiQuestion.isNotBlank(),
+                onClick = {
+                    scope.launch {
+                        aiBusy = true
+                        aiText = runCatching {
+                            Graph.ai.execute(com.viewtube.app.data.AiRequest(
+                                task = com.viewtube.app.data.AiTask.VIDEO_QUESTION,
+                                prompt = aiQuestion,
+                                videoTitle = dd.video.title,
+                                sourceText = dd.description,
+                                allowCloud = useCloudForAi && Graph.store.cloudAiEnabled.value
+                            ))?.let { "${it.text}\\n\\nSource: ${it.provider}" }
+                                ?: "No answer could be generated from the available description."
+                        }.getOrElse { "AI request failed: ${it.message}" }
+                        aiBusy = false
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Ask ViewTube AI") }
+            aiText?.let { Text(it, modifier = Modifier.padding(vertical = 12.dp), fontSize = 14.sp) }
+            if (useCloudForAi && !Graph.store.cloudAiEnabled.value) {
+                Text("Cloud AI is disabled in Account & settings. This request will stay on-device.", color = MaterialTheme.colorScheme.tertiary, fontSize = 12.sp)
+            }
+        }
+    }
+
 }
 
 @Composable

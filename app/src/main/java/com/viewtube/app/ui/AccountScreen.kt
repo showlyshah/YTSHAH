@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -42,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.viewtube.app.data.Graph
 import com.viewtube.app.data.SubscriptionImport
+import com.viewtube.app.player.PlayerHolder
 import com.viewtube.app.data.errorText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -57,7 +59,16 @@ fun AccountScreen(onBack: () -> Unit) {
     val pipedUser by store.pipedUser.collectAsStateCompat()
     val sponsor by store.sponsorSkip.collectAsStateCompat()
     val autoplay by store.autoplayNext.collectAsStateCompat()
+    val personalized by store.personalizedRecommendations.collectAsStateCompat()
+    val cloudAiEnabled by store.cloudAiEnabled.collectAsStateCompat()
+    val themeMode by store.themeMode.collectAsStateCompat()
+    val dataSaver by store.dataSaver.collectAsStateCompat()
+    val preferredHeight by store.preferredHeight.collectAsStateCompat()
+    val preferredAudioBitrate by store.preferredAudioBitrate.collectAsStateCompat()
     val subs by store.subs.collectAsStateCompat()
+    val history by store.history.collectAsStateCompat()
+    val later by store.later.collectAsStateCompat()
+    val queue by store.queue.collectAsStateCompat()
 
     var nameField by remember(name) { mutableStateOf(name) }
     var serverField by remember(server) { mutableStateOf(server) }
@@ -66,6 +77,53 @@ fun AccountScreen(onBack: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
     var confirmWipe by remember { mutableStateOf(false) }
+    var pendingBackup by remember { mutableStateOf<String?>(null) }
+    var aiBaseUrl by remember { mutableStateOf(Graph.secure.get(com.viewtube.app.data.OpenAiCompatibleProvider.KEY_BASE_URL) ?: com.viewtube.app.data.OpenAiCompatibleProvider.DEFAULT_BASE_URL) }
+    var aiModel by remember { mutableStateOf(Graph.secure.get(com.viewtube.app.data.OpenAiCompatibleProvider.KEY_MODEL) ?: com.viewtube.app.data.OpenAiCompatibleProvider.DEFAULT_MODEL) }
+    var aiKey by remember { mutableStateOf("") }
+    var cacheBytes by remember { mutableStateOf(PlayerHolder.playbackCacheBytes()) }
+
+    val diagnosticExport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            status = runCatching {
+                withContext(Dispatchers.IO) {
+                    ctx.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(Graph.diagnostics.exportJson()) }
+                        ?: error("Couldn't open the selected destination.")
+                }
+                "Redacted diagnostic report exported."
+            }.getOrElse { "Diagnostic export failed: ${it.message ?: "unknown error"}" }
+        }
+    }
+    val backupExport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            status = runCatching {
+                withContext(Dispatchers.IO) {
+                    ctx.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(store.exportBackup()) }
+                        ?: error("Couldn't open the selected destination.")
+                }
+                "ViewTube backup exported."
+            }.getOrElse { "Backup export failed: ${it.message ?: "unknown error"}" }
+        }
+    }
+    val backupImport = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            status = runCatching {
+                val raw = withContext(Dispatchers.IO) {
+                    ctx.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                        ?: error("Couldn't read the selected file.")
+                }
+                require(raw.length <= 5_000_000) { "Backup file is too large." }
+                org.json.JSONObject(raw).also {
+                    require(it.optInt("version", -1) == 1) { "Unsupported backup version." }
+                }
+                pendingBackup = raw
+                "Backup file validated. Confirm replacement below."
+            }.getOrElse { "Backup restore failed: ${it.message ?: "invalid backup"}" }
+        }
+    }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -152,9 +210,144 @@ fun AccountScreen(onBack: () -> Unit) {
             OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }) { Text("Import subscriptions file") }
         }
 
+        Section("Appearance") {
+            Text("Choose how ViewTube looks.")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("system", "light", "dark").forEach { mode ->
+                    FilterChip(
+                        selected = themeMode == mode,
+                        onClick = { store.setThemeMode(mode) },
+                        label = { Text(mode.replaceFirstChar { it.uppercase() }) }
+                    )
+                }
+            }
+        }
+
+        Section("Discovery") {
+            ToggleRow("Personalized recommendations", "Uses watch history locally on this phone; disabled by default", personalized) { store.setPersonalizedRecommendations(it) }
+        }
+
         Section("Playback") {
             ToggleRow("Skip sponsor & promo segments", "Uses the community SponsorBlock list", sponsor) { store.setSponsorSkip(it) }
             ToggleRow("Autoplay next video", null, autoplay) { store.setAutoplayNext(it) }
+            ToggleRow("Data saver", "Uses lower automatic quality on metered networks; manual Max overrides this", dataSaver) { store.setDataSaver(it) }
+            Text("Preferred playback quality")
+            listOf(-1, 0, 360, 480, 720, 1080, 1440, 2160).chunked(4).forEach { group ->
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    group.forEach { h ->
+                        FilterChip(
+                            selected = preferredHeight == h,
+                            onClick = { store.setPreferredHeight(h) },
+                            label = { Text(when (h) { -1 -> "Max"; 0 -> "Auto"; else -> "${h}p" }) }
+                        )
+                    }
+                }
+            }
+            Text("Preferred audio quality")
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(0, 320000, 256000, 192000, 128000).forEach { bitrate ->
+                    FilterChip(
+                        selected = preferredAudioBitrate == bitrate,
+                        onClick = { store.setPreferredAudioBitrate(bitrate) },
+                        label = { Text(if (bitrate == 0) "Highest" else "${bitrate / 1000} kbps") }
+                    )
+                }
+            }
+        }
+
+        Section("Hybrid AI intelligence") {
+            Text(
+                "Local topic analysis and description-based assistance work on-device. A cloud provider is optional. " +
+                    "Your API key is encrypted with Android Keystore and is never included in backups.",
+                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            OutlinedTextField(
+                aiBaseUrl, { aiBaseUrl = it },
+                label = { Text("OpenAI-compatible HTTPS endpoint") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                singleLine = true, modifier = Modifier.fillMaxWidth()
+            )
+            OutlinedTextField(
+                aiModel, { aiModel = it }, label = { Text("Model name") },
+                singleLine = true, modifier = Modifier.fillMaxWidth()
+            )
+            OutlinedTextField(
+                aiKey, { aiKey = it }, label = { Text("API key (leave blank to keep saved key)") },
+                singleLine = true, visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = {
+                    runCatching {
+                        require(aiBaseUrl.startsWith("https://", true)) { "Use an HTTPS endpoint." }
+                        require(aiModel.isNotBlank()) { "Enter a model name." }
+                        Graph.secure.put(com.viewtube.app.data.OpenAiCompatibleProvider.KEY_BASE_URL, aiBaseUrl.trim())
+                        Graph.secure.put(com.viewtube.app.data.OpenAiCompatibleProvider.KEY_MODEL, aiModel.trim())
+                        if (aiKey.isNotBlank()) Graph.secure.put(com.viewtube.app.data.OpenAiCompatibleProvider.KEY_API_KEY, aiKey.trim())
+                        aiKey = ""
+                        status = "AI provider settings saved securely."
+                    }.onFailure { status = it.message ?: "Could not save AI settings." }
+                }) { Text("Save AI settings") }
+                OutlinedButton(onClick = {
+                    Graph.secure.put(com.viewtube.app.data.OpenAiCompatibleProvider.KEY_API_KEY, null)
+                    aiKey = ""
+                    status = "Saved AI API key removed."
+                }) { Text("Remove key") }
+            }
+            ToggleRow(
+                "Enable optional cloud AI",
+                "Cloud requests still require explicit approval for each AI action.",
+                cloudAiEnabled
+            ) { store.setCloudAiEnabled(it) }
+        }
+
+        Section("Your viewing insights") {
+            val topics = com.viewtube.app.data.LocalRecommendationEngine.topicsFrom(history, 6)
+            Text("${history.size} videos in local watch history · ${later.size} saved · ${queue.size} queued")
+            Text(
+                "Top topics from video titles: " + (topics.joinToString(", ").ifBlank { "Not enough history yet" }),
+                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                "These statistics are calculated on this device. They are not uploaded.",
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        Section("Diagnostics") {
+            Text(
+                "${Graph.diagnostics.read().size} recent redacted diagnostic events stored locally.",
+                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { diagnosticExport.launch("viewtube-diagnostics.json") }) { Text("Export report") }
+                OutlinedButton(onClick = { Graph.diagnostics.clear(); status = "Diagnostic history cleared." }) { Text("Clear logs") }
+            }
+        }
+
+        Section("Storage & data") {
+            Text(
+                "Temporary stream cache: ${"%.1f".format(cacheBytes / (1024.0 * 1024.0))} MB. " +
+                    "ViewTube keeps a bounded cache to reduce repeat network usage; this is not a permanent download library.",
+                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            OutlinedButton(onClick = {
+                PlayerHolder.clearPlaybackCache()
+                cacheBytes = PlayerHolder.playbackCacheBytes()
+                status = "Temporary playback cache cleared."
+            }) { Text("Clear playback cache") }
+        }
+
+        Section("Backup & restore") {
+            Text(
+                "Export or restore your subscriptions, history, Watch later, queue, settings and playback positions. " +
+                    "Piped sign-in credentials are never included.",
+                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { backupExport.launch("viewtube-backup.json") }) { Text("Export backup") }
+                OutlinedButton(onClick = { backupImport.launch(arrayOf("application/json", "text/*")) }) { Text("Restore backup") }
+            }
         }
 
         Section("Privacy") {
@@ -179,6 +372,24 @@ fun AccountScreen(onBack: () -> Unit) {
         }
 
         status?.let { Text(it, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.primary) }
+    }
+
+    pendingBackup?.let { backup ->
+        AlertDialog(
+            onDismissRequest = { pendingBackup = null },
+            title = { Text("Restore ViewTube backup?") },
+            text = { Text("This replaces the current subscriptions, history, Watch later, queue and settings with the selected backup. Export your current data first if you may need it.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    status = runCatching {
+                        val restored = store.importBackup(backup)
+                        "Backup restored. Imported ${restored} saved items and subscriptions."
+                    }.getOrElse { "Backup restore failed: ${it.message ?: "invalid backup"}" }
+                    pendingBackup = null
+                }) { Text("Restore") }
+            },
+            dismissButton = { TextButton(onClick = { pendingBackup = null }) { Text("Cancel") } }
+        )
     }
 
     if (confirmWipe) AlertDialog(

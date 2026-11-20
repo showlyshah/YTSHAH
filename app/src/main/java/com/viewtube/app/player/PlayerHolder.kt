@@ -9,6 +9,11 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
+import androidx.media3.datasource.cache.SimpleCache
+import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.dash.DashMediaSource
@@ -33,6 +38,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.asSharedFlow
 import org.schabi.newpipe.extractor.MediaFormat
+import java.io.File
 import org.schabi.newpipe.extractor.stream.AudioStream
 import org.schabi.newpipe.extractor.stream.DeliveryMethod
 import org.schabi.newpipe.extractor.stream.Stream
@@ -44,8 +50,16 @@ import org.schabi.newpipe.extractor.stream.VideoStream
  */
 @UnstableApi
 object PlayerHolder {
+    private const val MAX_CACHE_BYTES = 256L * 1024L * 1024L
     private lateinit var appContext: Context
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val mediaCache: SimpleCache by lazy {
+        SimpleCache(
+            File(appContext.cacheDir, "viewtube_stream_cache"),
+            LeastRecentlyUsedCacheEvictor(MAX_CACHE_BYTES),
+            StandaloneDatabaseProvider(appContext)
+        )
+    }
 
     val player: ExoPlayer by lazy { buildPlayer() }
 
@@ -65,6 +79,10 @@ object PlayerHolder {
 
     private val _speed = MutableStateFlow(1f)
     val speed: StateFlow<Float> = _speed.asStateFlow()
+    private val _looping = MutableStateFlow(false)
+    val looping: StateFlow<Boolean> = _looping.asStateFlow()
+    private val _audioOnly = MutableStateFlow(false)
+    val audioOnly: StateFlow<Boolean> = _audioOnly.asStateFlow()
 
     /** Fired with the video id when autoplay moved on to the next video by itself. */
     private val _advanced = MutableSharedFlow<String>(extraBufferCapacity = 1)
@@ -76,16 +94,19 @@ object PlayerHolder {
     private var segments: List<SponsorBlock.Segment> = emptyList()
     private var watcher: Job? = null
     private var saver: Job? = null
+    private var sleepJob: Job? = null
+    private val _sleepRemainingMs = MutableStateFlow<Long?>(null)
+    val sleepRemainingMs: StateFlow<Long?> = _sleepRemainingMs.asStateFlow()
+    private val _repeatMode = MutableStateFlow("continuous")
+    val repeatMode: StateFlow<String> = _repeatMode.asStateFlow()
 
     fun init(context: Context) {
         appContext = context.applicationContext
     }
 
     private fun buildPlayer(): ExoPlayer {
-        val http = OkHttpDataSource.Factory(Graph.http)
-        val factory = DefaultDataSource.Factory(appContext) { YtDataSource(http.createDataSource()) }
         val p = ExoPlayer.Builder(appContext)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(factory))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(sourceFactory()))
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
@@ -109,21 +130,37 @@ object PlayerHolder {
 
     private fun onEnded() {
         val d = _current.value ?: return
-        if (looping || d.isLive || !Graph.store.autoplayNext.value) return
-        val next = d.related.firstOrNull { !Graph.store.isWatched(it.id) } ?: d.related.firstOrNull() ?: return
+        if (loopRepeatEnabled || d.isLive || _repeatMode.value == "one") return
+        if (_repeatMode.value == "off" || !Graph.store.autoplayNext.value) return
+        // A user-curated queue always takes precedence over automatic related videos.
+        val next = Graph.store.dequeueNext()
+            ?: d.related.firstOrNull { !Graph.store.isWatched(it.id) }
+            ?: d.related.firstOrNull()
+            ?: return
         scope.launch {
             runCatching {
                 val nd = Graph.repo.details(next.id)
                 Graph.store.addHistory(nd.video)
                 play(nd)
                 _advanced.emit(next.id)
-            }
+            }.onFailure { Graph.diagnostics.record("autoplay", it) }
         }
     }
 
-    private fun sourceFactory(): DefaultDataSource.Factory {
+    private fun sourceFactory(): DataSource.Factory {
         val http = OkHttpDataSource.Factory(Graph.http)
-        return DefaultDataSource.Factory(appContext) { YtDataSource(http.createDataSource()) }
+        val upstream = DefaultDataSource.Factory(appContext) { YtDataSource(http.createDataSource()) }
+        return CacheDataSource.Factory()
+            .setCache(mediaCache)
+            .setUpstreamDataSourceFactory(upstream)
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+    }
+
+    fun playbackCacheBytes(): Long = runCatching { mediaCache.cacheSpace }.getOrDefault(0L)
+
+    /** Clears temporary playback cache only; never touches Watch later, history or downloads. */
+    fun clearPlaybackCache() {
+        runCatching { mediaCache.keys.toList().forEach { mediaCache.removeResource(it) } }
     }
 
     // ------------------------------------------------------------- stream pick
@@ -137,7 +174,8 @@ object PlayerHolder {
     fun defaultHeight(d: VideoDetails): Int {
         val all = heights(d)
         val pref = Graph.store.preferredHeight.value
-        val target = if (pref > 0) pref else if (isMetered()) 480 else 720
+        if (pref == -1) return all.firstOrNull() ?: 0 // Explicit Max available always wins over Data Saver.
+        val target = if (pref > 0) pref else if (Graph.store.dataSaver.value || isMetered()) 360 else (all.firstOrNull() ?: 720)
         return all.firstOrNull { it <= target } ?: all.lastOrNull() ?: 0
     }
 
@@ -158,8 +196,14 @@ object PlayerHolder {
         val original = chosen.ifEmpty {
             playable.filter { it.audioTrackType == null || it.audioTrackType?.name == "ORIGINAL" }.ifEmpty { playable }
         }
-        return original.filter { it.format == MediaFormat.M4A }.maxByOrNull { it.averageBitrate }
-            ?: original.maxByOrNull { it.averageBitrate }
+        val preferred = Graph.store.preferredAudioBitrate.value
+        val bitrateChoice = if (preferred <= 0) original.maxByOrNull { it.averageBitrate }
+            else original.filter { it.averageBitrate <= preferred }.maxByOrNull { it.averageBitrate }
+                ?: original.minByOrNull { it.averageBitrate }
+        return bitrateChoice?.takeIf { it.format == MediaFormat.M4A }
+            ?: if (bitrateChoice != null) bitrateChoice
+            else original.filter { it.format == MediaFormat.M4A }.maxByOrNull { it.averageBitrate }
+                ?: original.maxByOrNull { it.averageBitrate }
     }
 
     private fun bestVideo(list: List<VideoStream>, height: Int): VideoStream? {
@@ -182,7 +226,7 @@ object PlayerHolder {
 
     // -------------------------------------------------------------------- play
 
-    private var looping = false
+    private var loopRepeatEnabled = false
 
     fun play(
         d: VideoDetails,
@@ -191,8 +235,10 @@ object PlayerHolder {
         audioTrackId: String? = _audioTrack.value,
         loop: Boolean = false,
     ) {
-        looping = loop
-        player.repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+        if (loop) _repeatMode.value = "one"
+        loopRepeatEnabled = _repeatMode.value == "one"
+        _looping.value = loopRepeatEnabled
+        player.repeatMode = if (loopRepeatEnabled) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
         _audioTrack.value = audioTrackId
         val same = _current.value?.video?.id == d.video.id
         val resumeAt = if (same && startMs == 0L) player.currentPosition else startMs
@@ -242,7 +288,7 @@ object PlayerHolder {
 
     fun stop() {
         saveProgress()
-        watcher?.cancel(); saver?.cancel()
+        watcher?.cancel(); saver?.cancel(); sleepJob?.cancel(); sleepJob = null; _sleepRemainingMs.value = null
         player.stop()
         player.clearMediaItems()
         _current.value = null
@@ -253,9 +299,61 @@ object PlayerHolder {
 
     fun toggle() { if (player.playWhenReady) player.pause() else player.play() }
 
-    fun setSpeed(s: Float) { _speed.value = s; player.setPlaybackSpeed(s) }
+    fun setSpeed(s: Float) {
+        val safe = s.coerceIn(0.25f, 3f)
+        _speed.value = safe
+        player.setPlaybackSpeed(safe)
+    }
 
-    fun setLooping(on: Boolean) { looping = on; player.repeatMode = if (on) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF }
+    fun seekBy(deltaMs: Long) {
+        val duration = player.duration
+        val target = (player.currentPosition + deltaMs).coerceAtLeast(0L)
+        player.seekTo(if (duration > 0L) target.coerceAtMost(duration) else target)
+    }
+
+    fun setLooping(on: Boolean) { setRepeatMode(if (on) "one" else "continuous") }
+
+    /** off = stop after this video, one = repeat current video, continuous = advance to next. */
+    fun setRepeatMode(mode: String) {
+        val safe = mode.takeIf { it in setOf("off", "one", "continuous") } ?: "continuous"
+        _repeatMode.value = safe
+        loopRepeatEnabled = safe == "one"
+        _looping.value = safe == "one"
+        player.repeatMode = if (safe == "one") Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+        Graph.store.setAutoplayNext(safe == "continuous")
+    }
+
+    fun setSleepTimer(minutes: Int) {
+        sleepJob?.cancel()
+        if (minutes <= 0) { _sleepRemainingMs.value = null; return }
+        val duration = minutes.coerceIn(1, 240) * 60_000L
+        _sleepRemainingMs.value = duration
+        sleepJob = scope.launch {
+            var left = duration
+            while (left > 0L) {
+                delay(1_000)
+                left -= 1_000
+                _sleepRemainingMs.value = left.coerceAtLeast(0L)
+            }
+            player.pause()
+            _sleepRemainingMs.value = null
+            sleepJob = null
+        }
+    }
+
+    fun cancelSleepTimer() {
+        sleepJob?.cancel()
+        sleepJob = null
+        _sleepRemainingMs.value = null
+    }
+
+    /** Disables only the video renderer; audio continues through the same media session. */
+    fun setAudioOnly(on: Boolean) {
+        _audioOnly.value = on
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, on)
+            .build()
+    }
 
     // ---------------------------------------------------------- sponsor skipping
 

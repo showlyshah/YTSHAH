@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Subscriptions
@@ -46,8 +47,11 @@ fun MiniPlayer(onOpen: (String) -> Unit) {
             Text(details.video.title, maxLines = 1, fontWeight = FontWeight.Medium)
             Text(details.channel.name, maxLines = 1, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        IconButton(onClick = { PlayerHolder.toggle() }, modifier = Modifier.size(40.dp)) {
-            Text(if (playing) "Ⅱ" else "▶", fontWeight = FontWeight.Bold)
+        IconButton(onClick = { PlayerHolder.toggle() }, modifier = Modifier.size(36.dp)) {
+            Text(if (playing) "Ⅱ" else "▶", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        }
+        IconButton(onClick = { PlayerHolder.stop() }, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Default.Close, contentDescription = "Close player", modifier = Modifier.size(18.dp))
         }
     }
 }

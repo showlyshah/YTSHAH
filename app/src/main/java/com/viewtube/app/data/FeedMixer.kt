@@ -24,15 +24,25 @@ class FeedMixer(
         while (out.size < min && cursors.isNotEmpty() && failures < 6) {
             val c = cursors[turn % cursors.size]
             turn++
-            val page = runCatching {
-                if (!c.started) { c.started = true; repo.search(c.topic, FILTER_VIDEOS) }
-                else c.next?.invoke()
-            }.getOrNull()
-            if (page == null) {
+            val page = try {
+                if (!c.started) repo.search(c.topic, FILTER_VIDEOS)
+                else c.next?.invoke() ?: run {
+                    cursors.remove(c)
+                    null
+                }
+            } catch (_: Throwable) {
+                // A transient network/HTTP failure must not permanently discard this topic.
                 failures++
-                cursors.remove(c)
+                null
+            }
+            if (page == null) {
+                if (cursors.contains(c) && !c.started) {
+                    // Keep a failed first-page cursor so the next scroll can retry it.
+                    continue
+                }
                 continue
             }
+            c.started = true
             c.next = page.next
             if (page.next == null) cursors.remove(c)
             for (v in page.items.filterIsInstance<VideoItem>()) {
