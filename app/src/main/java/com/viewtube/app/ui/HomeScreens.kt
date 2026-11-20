@@ -25,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -43,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.viewtube.app.data.ChannelItem
 import com.viewtube.app.data.Graph
+import com.viewtube.app.data.FeedMixer
 import com.viewtube.app.data.Item
 import com.viewtube.app.data.Paged
 import com.viewtube.app.data.VideoItem
@@ -79,32 +81,91 @@ fun HomeScreen(
 ) {
     val scope = rememberCoroutineScope()
     val subs by Graph.store.subs.collectAsStateCompat()
+    val listState = rememberLazyListState()
     var videos by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var refreshing by remember { mutableStateOf(false) }
+    var loadingMore by remember { mutableStateOf(false) }
+    var canLoadMore by remember { mutableStateOf(false) }
+    var pageError by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
+    val mixer = remember(reload) {
+        FeedMixer(
+            listOf("popular", "music", "technology", "gaming", "science", "news", "education"),
+            Graph.repo,
+        ) { true }
+    }
 
-    LaunchedEffect(reload, subs.size) {
+    LaunchedEffect(reload, subs.map { it.id }) {
+        loading = true
         error = null
-        if (videos.isEmpty()) loading = true
-        runCatching {
-            val trending = Graph.repo.trending()
-            val fromSubs = if (subs.isEmpty()) emptyList() else Graph.repo.feed(subs.map { it.id }, 3).take(20)
-            (fromSubs + trending).distinctBy { it.id }
-        }.onSuccess { videos = it }.onFailure { if (videos.isEmpty()) error = errorText(it) }
+        pageError = null
+        canLoadMore = false
+
+        val trendingResult = runCatching { Graph.repo.trending() }
+        val subscriptionResult = runCatching {
+            if (subs.isEmpty()) emptyList() else Graph.repo.feed(subs.map { it.id }, 3).take(20)
+        }
+        val discovery = mixer.more(12)
+        videos = (subscriptionResult.getOrDefault(emptyList()) +
+            trendingResult.getOrDefault(emptyList()) + discovery).distinctBy { it.id }
+
+        if (videos.isEmpty()) {
+            error = listOfNotNull(
+                trendingResult.exceptionOrNull()?.let(::errorText),
+                subscriptionResult.exceptionOrNull()?.let(::errorText),
+                mixer.lastError?.let(::errorText),
+            ).firstOrNull() ?: "No videos are available right now."
+        } else {
+            canLoadMore = !mixer.exhausted && mixer.lastError == null
+            pageError = mixer.lastError?.let(::errorText)
+        }
         loading = false
         refreshing = false
     }
 
+    LoadMoreEffect(listState, canLoadMore && !loadingMore) {
+        loadingMore = true
+        scope.launch {
+            val page = mixer.more(12)
+            if (page.isNotEmpty()) {
+                val existing = videos.mapTo(HashSet()) { it.id }
+                videos = videos + page.filter { existing.add(it.id) }
+            }
+            pageError = mixer.lastError?.let(::errorText)
+            canLoadMore = !mixer.exhausted && mixer.lastError == null
+            loadingMore = false
+        }
+    }
+
     Column(Modifier.fillMaxSize()) {
         TopBar(onSearch, onAccount)
-        PullToRefreshBox(isRefreshing = refreshing, onRefresh = { refreshing = true; reload++ }, modifier = Modifier.fillMaxSize()) {
+        PullToRefreshBox(
+            isRefreshing = refreshing,
+            onRefresh = { refreshing = true; reload++ },
+            modifier = Modifier.fillMaxSize(),
+        ) {
             when {
-                loading -> Loading()
-                error != null -> Message("Couldn't load videos", error, "Try again") { reload++ }
-                else -> LazyColumn(Modifier.fillMaxSize()) {
-                    items(videos, key = { it.id }) { v -> VideoCard(v, { onVideo(v) }, onChannel) }
+                loading && videos.isEmpty() -> Loading()
+                error != null && videos.isEmpty() -> Message("Couldn't load videos", error, "Try again") { reload++ }
+                else -> LazyColumn(Modifier.fillMaxSize(), state = listState) {
+                    items(videos, key = { it.id }) { video ->
+                        VideoCard(video, { onVideo(video) }, onChannel)
+                    }
+                    if (loadingMore) {
+                        item { Loading(Modifier.fillMaxWidth().height(64.dp)) }
+                    } else if (pageError != null) {
+                        item {
+                            Row(
+                                Modifier.fillMaxWidth().padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(pageError.orEmpty(), Modifier.weight(1f), color = MaterialTheme.colorScheme.error)
+                                TextButton(onClick = { pageError = null; canLoadMore = true }) { Text("Retry") }
+                            }
+                        }
+                    }
                 }
             }
         }
