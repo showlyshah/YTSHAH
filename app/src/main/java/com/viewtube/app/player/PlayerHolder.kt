@@ -168,7 +168,8 @@ object PlayerHolder {
     fun defaultHeight(d: VideoDetails): Int {
         val all = heights(d)
         val pref = Graph.store.preferredHeight.value
-        val target = if (pref > 0) pref else if (Graph.store.dataSaver.value || isMetered()) 360 else 720
+        if (pref == -1) return all.firstOrNull() ?: 0 // Explicit Max available always wins over Data Saver.
+        val target = if (pref > 0) pref else if (Graph.store.dataSaver.value || isMetered()) 360 else (all.firstOrNull() ?: 720)
         return all.firstOrNull { it <= target } ?: all.lastOrNull() ?: 0
     }
 
@@ -189,8 +190,14 @@ object PlayerHolder {
         val original = chosen.ifEmpty {
             playable.filter { it.audioTrackType == null || it.audioTrackType?.name == "ORIGINAL" }.ifEmpty { playable }
         }
-        return original.filter { it.format == MediaFormat.M4A }.maxByOrNull { it.averageBitrate }
-            ?: original.maxByOrNull { it.averageBitrate }
+        val preferred = Graph.store.preferredAudioBitrate.value
+        val bitrateChoice = if (preferred <= 0) original.maxByOrNull { it.averageBitrate }
+            else original.filter { it.averageBitrate <= preferred }.maxByOrNull { it.averageBitrate }
+                ?: original.minByOrNull { it.averageBitrate }
+        return bitrateChoice?.takeIf { it.format == MediaFormat.M4A }
+            ?: if (bitrateChoice != null) bitrateChoice
+            else original.filter { it.format == MediaFormat.M4A }.maxByOrNull { it.averageBitrate }
+                ?: original.maxByOrNull { it.averageBitrate }
     }
 
     private fun bestVideo(list: List<VideoStream>, height: Int): VideoStream? {
