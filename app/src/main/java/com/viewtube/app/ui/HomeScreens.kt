@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.sp
 import com.viewtube.app.data.ChannelItem
 import com.viewtube.app.data.Graph
 import com.viewtube.app.data.Item
+import com.viewtube.app.data.LocalRecommendationEngine
 import com.viewtube.app.data.Paged
 import com.viewtube.app.data.VideoItem
 import com.viewtube.app.data.errorText
@@ -92,7 +93,7 @@ fun HomeScreen(
             val trending = Graph.repo.trending()
             val fromSubs = if (subs.isEmpty()) emptyList() else Graph.repo.feed(subs.map { it.id }, 3).take(20)
             (fromSubs + trending).distinctBy { it.id }
-        }.onSuccess { videos = it }.onFailure { if (videos.isEmpty()) error = errorText(it) }
+        }.onSuccess { videos = LocalRecommendationEngine.rank(it, Graph.store.history.value, subs) }.onFailure { if (videos.isEmpty()) error = errorText(it) }
         loading = false
         refreshing = false
     }
