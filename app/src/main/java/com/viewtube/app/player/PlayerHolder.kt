@@ -110,14 +110,18 @@ object PlayerHolder {
     private fun onEnded() {
         val d = _current.value ?: return
         if (looping || d.isLive || !Graph.store.autoplayNext.value) return
-        val next = d.related.firstOrNull { !Graph.store.isWatched(it.id) } ?: d.related.firstOrNull() ?: return
+        // A user-curated queue always takes precedence over automatic related videos.
+        val next = Graph.store.dequeueNext()
+            ?: d.related.firstOrNull { !Graph.store.isWatched(it.id) }
+            ?: d.related.firstOrNull()
+            ?: return
         scope.launch {
             runCatching {
                 val nd = Graph.repo.details(next.id)
                 Graph.store.addHistory(nd.video)
                 play(nd)
                 _advanced.emit(next.id)
-            }
+            }.onFailure { Graph.diagnostics.record("autoplay", it) }
         }
     }
 
