@@ -238,8 +238,8 @@ fun WatchScreen(
                         onLoad = {
                             scope.launch {
                                 loadingComments = true
-                                val p = Graph.repo.comments(d.video.id)
-                                comments = p; commentList = p.items
+                                runCatching { Graph.repo.comments(d.video.id) }
+                                    .onSuccess { p -> comments = p; commentList = p.items }
                                 loadingComments = false
                             }
                         },
@@ -247,7 +247,7 @@ fun WatchScreen(
                             val n = comments?.next ?: return@CommentsSection
                             scope.launch {
                                 loadingComments = true
-                                runCatching { n() }.onSuccess { comments = it; commentList = commentList + it.items }
+                                runCatching { n() }.onSuccess { p -> comments = p; commentList = (commentList + p.items).distinctBy { it.author + "|" + it.text } }
                                 loadingComments = false
                             }
                         }
