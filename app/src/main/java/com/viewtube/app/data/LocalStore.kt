@@ -17,6 +17,7 @@ class LocalStore(context: Context) {
     private val _subs = MutableStateFlow(loadChannels("subs"))
     private val _history = MutableStateFlow(loadVideos("history"))
     private val _later = MutableStateFlow(loadVideos("later"))
+    private val _queue = MutableStateFlow(loadVideos("queue"))
     private val _profile = MutableStateFlow(prefs.getString("profile_name", "").orEmpty())
     private val _searches = MutableStateFlow(loadStrings("searches"))
     private val _prefHeight = MutableStateFlow(prefs.getInt("pref_height", 0))
@@ -30,6 +31,7 @@ class LocalStore(context: Context) {
     val subs: StateFlow<List<ChannelItem>> = _subs.asStateFlow()
     val history: StateFlow<List<VideoItem>> = _history.asStateFlow()
     val later: StateFlow<List<VideoItem>> = _later.asStateFlow()
+    val queue: StateFlow<List<VideoItem>> = _queue.asStateFlow()
     val profileName: StateFlow<String> = _profile.asStateFlow()
     val searchHistory: StateFlow<List<String>> = _searches.asStateFlow()
     /** Preferred video height in pixels, 0 = automatic. */
@@ -101,6 +103,31 @@ class LocalStore(context: Context) {
         saveVideos("later", _later.value)
     }
 
+    // ------------------------------------------------------------- playback queue
+
+    /** Add a video to the persistent play-next queue without creating duplicates. */
+    fun enqueue(video: VideoItem) {
+        _queue.value = _queue.value.filterNot { it.id == video.id } + video
+        saveVideos("queue", _queue.value)
+    }
+
+    fun removeFromQueue(videoId: String) {
+        _queue.value = _queue.value.filterNot { it.id == videoId }
+        saveVideos("queue", _queue.value)
+    }
+
+    fun dequeueNext(): VideoItem? {
+        val next = _queue.value.firstOrNull() ?: return null
+        _queue.value = _queue.value.drop(1)
+        saveVideos("queue", _queue.value)
+        return next
+    }
+
+    fun clearQueue() {
+        _queue.value = emptyList()
+        saveVideos("queue", emptyList())
+    }
+
     // --------------------------------------------------------------- settings
 
     fun setProfileName(name: String) { _profile.value = name.trim(); prefs.edit().putString("profile_name", name.trim()).apply() }
@@ -130,7 +157,7 @@ class LocalStore(context: Context) {
     /** Deletes all personal data from this device. */
     fun wipeAll() {
         prefs.edit().clear().apply()
-        _subs.value = emptyList(); _history.value = emptyList(); _later.value = emptyList()
+        _subs.value = emptyList(); _history.value = emptyList(); _later.value = emptyList(); _queue.value = emptyList()
         _profile.value = ""; _searches.value = emptyList(); _prefHeight.value = 0
         _sponsorSkip.value = true; _autoplay.value = true; _personalizedRecommendations.value = false
         _pipedServer.value = "https://pipedapi.adminforge.de"; _pipedUser.value = null
