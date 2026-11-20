@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.media.AudioManager
 import android.hardware.display.DisplayManager
 import android.view.Display
@@ -57,6 +58,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -94,6 +96,8 @@ fun WatchScreen(
     onChannel: (String) -> Unit,
 ) {
     val ctx = LocalContext.current
+    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val immersivePlayer = fullscreen || landscape
     val hdrDisplaySupported = remember(ctx) {
         runCatching {
             val dm = ctx.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
@@ -161,18 +165,16 @@ fun WatchScreen(
     }
 
     // Fullscreen = landscape + hidden system bars.
-    DisposableEffect(fullscreen) {
+    DisposableEffect(immersivePlayer, fullscreen) {
         val act = ctx.activity()
         if (act != null) {
             val ctl = WindowInsetsControllerCompat(act.window, act.window.decorView)
-            if (fullscreen) {
-                act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            if (fullscreen) act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            else act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            if (immersivePlayer) {
                 ctl.hide(WindowInsetsCompat.Type.systemBars())
                 ctl.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            } else {
-                act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-                ctl.show(WindowInsetsCompat.Type.systemBars())
-            }
+            } else ctl.show(WindowInsetsCompat.Type.systemBars())
         }
         onDispose {
             ctx.activity()?.let {
@@ -203,7 +205,7 @@ fun WatchScreen(
                 update = { it.player = PlayerHolder.player },
                 modifier = Modifier.fillMaxSize()
             )
-            if (!fullscreen) IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart)) {
+            if (!immersivePlayer) IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart)) {
                 Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Minimize", tint = Color.White)
             }
             Row(Modifier.align(Alignment.TopEnd).padding(3.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -272,7 +274,7 @@ fun WatchScreen(
         }
     }
 
-    if (fullscreen) {
+    if (immersivePlayer) {
         playerBox(Modifier.fillMaxSize())
     } else {
         Column(Modifier.fillMaxSize()) {
