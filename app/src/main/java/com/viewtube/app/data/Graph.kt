@@ -18,6 +18,7 @@ object Graph {
     lateinit var secure: SecureStore; private set
     lateinit var piped: PipedClient; private set
     lateinit var diagnostics: DiagnosticJournal; private set
+    lateinit var ai: HybridAiCoordinator; private set
 
     fun init(context: Context) {
         val app = context.applicationContext
@@ -40,6 +41,11 @@ object Graph {
         repo = YouTubeRepo(http)
         sponsor = SponsorBlock(http)
         piped = PipedClient(http, secure, store)
+        ai = HybridAiCoordinator(
+            local = BasicLocalAiEngine(),
+            cloudProvider = { OpenAiCompatibleProvider(http, secure) },
+            cloudEnabled = { store.cloudAiEnabled.value },
+        )
         com.viewtube.app.player.PlayerHolder.init(app)
     }
 }
