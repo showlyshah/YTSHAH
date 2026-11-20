@@ -188,7 +188,7 @@ fun WatchScreen(
             var drag = 0f
             detectVerticalDragGestures(onVerticalDrag = { _, amount ->
                 drag += amount
-                if (fullscreen && drag > 70f) { fullscreen = false; drag = 0f }
+                if (fullscreen && drag > 70f) { onBack(); drag = 0f }
             }, onDragEnd = { drag = 0f })
         }) {
             AndroidView(
