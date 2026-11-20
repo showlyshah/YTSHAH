@@ -9,7 +9,8 @@ import org.json.JSONObject
 
 /**
  * Everything personal lives here, on the device: profile name, subscriptions, watch history,
- * "watch later" and settings. Nothing is sent anywhere.
+ * "watch later" and settings. These records remain local unless the user explicitly syncs
+ * subscriptions with a configured Piped account.
  */
 class LocalStore(context: Context) {
     private val prefs = context.getSharedPreferences("viewtube", Context.MODE_PRIVATE)
