@@ -38,6 +38,9 @@ class ChannelPage(val channel: ChannelItem, val videos: Paged<VideoItem>)
 private val VIDEO_ID = Regex("""(?:[?&]v=|youtu\.be/|/shorts/|/embed/|/live/)([\w-]{11})""")
 fun videoIdFromUrl(url: String): String? = VIDEO_ID.find(url)?.groupValues?.get(1)
 
+const val FILTER_VIDEOS = "videos"
+const val FILTER_CHANNELS = "channels"
+
 class YouTubeRepo(private val http: OkHttpClient) {
     private val yt = ServiceList.YouTube
 
@@ -49,8 +52,10 @@ class YouTubeRepo(private val http: OkHttpClient) {
         runCatching { yt.suggestionExtractor.suggestionList(query) }.getOrDefault(emptyList())
     }
 
-    suspend fun search(query: String): Paged<Item> = io {
-        val handler = yt.searchQHFactory.fromQuery(query)
+    /** [filter] is FILTER_VIDEOS or FILTER_CHANNELS, or null for everything. */
+    suspend fun search(query: String, filter: String? = null): Paged<Item> = io {
+        val handler = if (filter == null) yt.searchQHFactory.fromQuery(query)
+        else yt.searchQHFactory.fromQuery(query, listOf(filter), "")
         val info = SearchInfo.getInfo(yt, handler)
         searchPaged(handler, info.relatedItems, info.nextPage)
     }
@@ -293,6 +298,7 @@ class YouTubeRepo(private val http: OkHttpClient) {
             views = viewCount,
             publishedText = textualUploadDate,
             isLive = streamType == StreamType.LIVE_STREAM || streamType == StreamType.AUDIO_LIVE_STREAM,
+            isShort = isShortFormContent || url.contains("/shorts/"),
         )
     }
 

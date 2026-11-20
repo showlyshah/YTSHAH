@@ -19,6 +19,7 @@ data class VideoItem(
     val publishedText: String? = null,
     val publishedMs: Long = 0,
     val isLive: Boolean = false,
+    val isShort: Boolean = false,
 ) : Item {
     val url: String get() = watchUrl(id)
 
@@ -27,7 +28,7 @@ data class VideoItem(
         put("channelUrl", channelUrl ?: ""); put("channelAvatar", channelAvatar ?: "")
         put("thumbnail", thumbnail ?: ""); put("durationSec", durationSec)
         put("views", views); put("publishedText", publishedText ?: "")
-        put("publishedMs", publishedMs); put("isLive", isLive)
+        put("publishedMs", publishedMs); put("isLive", isLive); put("isShort", isShort)
         extra.forEach { (k, v) -> put(k, v) }
     }
 
@@ -44,6 +45,7 @@ data class VideoItem(
             publishedText = o.optString("publishedText").ifBlank { null },
             publishedMs = o.optLong("publishedMs", 0),
             isLive = o.optBoolean("isLive", false),
+            isShort = o.optBoolean("isShort", false),
         )
     }
 }
