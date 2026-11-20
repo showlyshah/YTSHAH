@@ -8,8 +8,8 @@ class SubscriptionImportTest {
 
     @Test
     fun parsesGoogleTakeoutCsvWithCommasAndEscapedQuotes() {
-        val csv = """Channel Id,Channel Url,Channel Title
-"UC12345678901","https://www.youtube.com/channel/UC12345678901","News, ""World"""
+        val csv = "Channel Id,Channel Url,Channel Title\\n" +
+            "\\\"UC12345678901\\\",\\\"https://www.youtube.com/channel/UC12345678901\\\",\\\"News, \\\"\\\"World\\\"\\\"\\\""
         val result = SubscriptionImport.parse(csv)
 
         assertEquals(1, result.size)
