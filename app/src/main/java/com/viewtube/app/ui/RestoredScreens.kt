@@ -33,10 +33,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.media3.common.util.UnstableApi
 import com.viewtube.app.data.Graph
 import com.viewtube.app.data.VideoItem
 import com.viewtube.app.player.PlayerHolder
 
+@androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 fun MiniPlayer(onOpen: (String) -> Unit) {
     val current by PlayerHolder.current.collectAsStateCompat()
