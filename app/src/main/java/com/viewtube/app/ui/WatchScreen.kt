@@ -21,6 +21,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Switch
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material.icons.Icons
@@ -94,6 +96,11 @@ fun WatchScreen(
     var showDesc by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf(false) }
     var queueSheet by remember { mutableStateOf(false) }
+    var aiSheet by remember { mutableStateOf(false) }
+    var aiBusy by remember { mutableStateOf(false) }
+    var aiText by remember { mutableStateOf<String?>(null) }
+    var aiQuestion by remember { mutableStateOf("") }
+    var useCloudForAi by remember { mutableStateOf(false) }
     val audioSel by PlayerHolder.audioTrack.collectAsStateCompat()
     val speed by PlayerHolder.speed.collectAsStateCompat()
     val looping by PlayerHolder.looping.collectAsStateCompat()
@@ -233,6 +240,8 @@ fun WatchScreen(
                             )
                             Spacer(Modifier.width(8.dp))
                             AssistChip(onClick = { queueSheet = true }, label = { Text("Queue ${queue.size}") })
+                            Spacer(Modifier.width(8.dp))
+                            AssistChip(onClick = { aiSheet = true; aiText = null }, label = { Text("AI insights") })
                         }
 
                         Row(Modifier.padding(top = 4.dp)) {
@@ -346,6 +355,73 @@ fun WatchScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+
+    if (aiSheet && dd != null) ModalBottomSheet(onDismissRequest = { aiSheet = false }) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
+            Text("Video intelligence", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+            Text(
+                "Analysis uses the video description available to ViewTube, not a guaranteed full transcript. " +
+                    "Cloud processing is optional and requires both the global setting and your approval here.",
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 6.dp, bottom = 10.dp)
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Allow cloud for this request", modifier = Modifier.weight(1f))
+                Switch(checked = useCloudForAi, onCheckedChange = { useCloudForAi = it })
+            }
+            OutlinedButton(
+                enabled = !aiBusy,
+                onClick = {
+                    scope.launch {
+                        aiBusy = true
+                        aiText = runCatching {
+                            Graph.ai.execute(com.viewtube.app.data.AiRequest(
+                                task = com.viewtube.app.data.AiTask.VIDEO_SUMMARY,
+                                prompt = "Summarize the main points in this video's available description.",
+                                videoTitle = dd.video.title,
+                                sourceText = dd.description,
+                                allowCloud = useCloudForAi && Graph.store.cloudAiEnabled.value
+                            ))?.let { "${it.text}\\n\\nSource: ${it.provider}" }
+                                ?: "There isn't enough description text to summarize."
+                        }.getOrElse { "AI request failed: ${it.message}" }
+                        aiBusy = false
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text(if (aiBusy) "Analysing..." else "Summarize video") }
+            OutlinedTextField(
+                value = aiQuestion,
+                onValueChange = { aiQuestion = it },
+                label = { Text("Ask a question about this video") },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !aiBusy
+            )
+            OutlinedButton(
+                enabled = !aiBusy && aiQuestion.isNotBlank(),
+                onClick = {
+                    scope.launch {
+                        aiBusy = true
+                        aiText = runCatching {
+                            Graph.ai.execute(com.viewtube.app.data.AiRequest(
+                                task = com.viewtube.app.data.AiTask.VIDEO_QUESTION,
+                                prompt = aiQuestion,
+                                videoTitle = dd.video.title,
+                                sourceText = dd.description,
+                                allowCloud = useCloudForAi && Graph.store.cloudAiEnabled.value
+                            ))?.let { "${it.text}\\n\\nSource: ${it.provider}" }
+                                ?: "No answer could be generated from the available description."
+                        }.getOrElse { "AI request failed: ${it.message}" }
+                        aiBusy = false
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Ask ViewTube AI") }
+            aiText?.let { Text(it, modifier = Modifier.padding(vertical = 12.dp), fontSize = 14.sp) }
+            if (useCloudForAi && !Graph.store.cloudAiEnabled.value) {
+                Text("Cloud AI is disabled in Account & settings. This request will stay on-device.", color = MaterialTheme.colorScheme.tertiary, fontSize = 12.sp)
             }
         }
     }
