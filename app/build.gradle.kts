@@ -31,8 +31,8 @@ android {
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
     lint {
-        abortOnError = false        // Media3's "unstable API" opt-in warnings are not build errors
-        checkReleaseBuilds = false
+        abortOnError = true
+        checkReleaseBuilds = true
     }
 
     packaging {
@@ -75,4 +75,6 @@ dependencies {
     implementation("androidx.media3:media3-datasource-okhttp:$media3")
     implementation("androidx.media3:media3-session:$media3")
     implementation("androidx.media3:media3-ui:$media3")
+
+    testImplementation("junit:junit:4.13.2")
 }
