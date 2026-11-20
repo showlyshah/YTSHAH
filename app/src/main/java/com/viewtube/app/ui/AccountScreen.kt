@@ -64,6 +64,7 @@ fun AccountScreen(onBack: () -> Unit) {
     val themeMode by store.themeMode.collectAsStateCompat()
     val dataSaver by store.dataSaver.collectAsStateCompat()
     val preferredHeight by store.preferredHeight.collectAsStateCompat()
+    val preferredAudioBitrate by store.preferredAudioBitrate.collectAsStateCompat()
     val subs by store.subs.collectAsStateCompat()
     val history by store.history.collectAsStateCompat()
     val later by store.later.collectAsStateCompat()
@@ -229,14 +230,24 @@ fun AccountScreen(onBack: () -> Unit) {
         Section("Playback") {
             ToggleRow("Skip sponsor & promo segments", "Uses the community SponsorBlock list", sponsor) { store.setSponsorSkip(it) }
             ToggleRow("Autoplay next video", null, autoplay) { store.setAutoplayNext(it) }
-            ToggleRow("Data saver", "Targets up to 360p automatically on metered networks", dataSaver) { store.setDataSaver(it) }
+            ToggleRow("Data saver", "Uses lower automatic quality on metered networks; manual Max overrides this", dataSaver) { store.setDataSaver(it) }
             Text("Preferred playback quality")
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf(0, 360, 480, 720, 1080).forEach { h ->
+                listOf(-1, 0, 360, 480, 720, 1080, 1440, 2160).forEach { h ->
                     FilterChip(
                         selected = preferredHeight == h,
                         onClick = { store.setPreferredHeight(h) },
-                        label = { Text(if (h == 0) "Auto" else "${h}p") }
+                        label = { Text(when (h) { -1 -> "Max"; 0 -> "Auto"; else -> "${h}p" }) }
+                    )
+                }
+            }
+            Text("Preferred audio quality")
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(0, 320000, 256000, 192000, 128000).forEach { bitrate ->
+                    FilterChip(
+                        selected = preferredAudioBitrate == bitrate,
+                        onClick = { store.setPreferredAudioBitrate(bitrate) },
+                        label = { Text(if (bitrate == 0) "Highest" else "${bitrate / 1000} kbps") }
                     )
                 }
             }
