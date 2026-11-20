@@ -53,18 +53,31 @@ fun ChannelScreen(url: String, onBack: () -> Unit, onVideo: (VideoItem) -> Unit,
     val list = rememberLazyListState()
 
     LaunchedEffect(url, attempt) {
-        error = null; page = null; videos = emptyList(); next = null; pageError = null
+        error = null; page = null; videos = emptyList(); next = null; pageError = null; loadingMore = false
         runCatching { Graph.repo.channel(url) }
             .onSuccess { page = it; videos = it.videos.items; next = it.videos.next }
             .onFailure { error = errorText(it) }
     }
     LoadMoreEffect(list, next != null && !loadingMore && pageError == null) {
         val n = next ?: return@LoadMoreEffect
+        val generationUrl = url
+        val generationAttempt = attempt
         loadingMore = true
         scope.launch {
-            runCatching { n() }.onSuccess { videos = (videos + it.items).distinctBy { video -> video.id }; next = it.next; pageError = null }
-                .onFailure { pageError = errorText(it) }
-            loadingMore = false
+            try {
+                val result = n()
+                if (url == generationUrl && attempt == generationAttempt) {
+                    videos = (videos + result.items).distinctBy { video -> video.id }
+                    next = result.next
+                    pageError = null
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                if (url == generationUrl && attempt == generationAttempt) pageError = errorText(failure)
+            } finally {
+                if (url == generationUrl && attempt == generationAttempt) loadingMore = false
+            }
         }
     }
 
