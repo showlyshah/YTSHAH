@@ -73,6 +73,8 @@ import com.viewtube.app.data.Comment
 import com.viewtube.app.data.Graph
 import com.viewtube.app.data.Paged
 import com.viewtube.app.data.VideoDetails
+import com.viewtube.app.data.SubtitleTrack
+import com.viewtube.app.data.OnDeviceSubtitleTranslator
 import com.viewtube.app.data.errorText
 import com.viewtube.app.data.watchUrl
 import com.viewtube.app.player.PlayerHolder
@@ -121,6 +123,11 @@ fun WatchScreen(
     var aiQuestion by remember { mutableStateOf("") }
     var useCloudForAi by remember { mutableStateOf(false) }
     var gestureFeedback by remember { mutableStateOf<String?>(null) }
+    var translationEnabled by remember { mutableStateOf(false) }
+    var selectedSubtitleTrack by remember { mutableStateOf<SubtitleTrack?>(null) }
+    var translationTarget by remember { mutableStateOf(java.util.Locale.getDefault().language.takeIf { it in setOf("en", "ml", "hi", "ta", "te", "ar", "fr", "es") } ?: "en") }
+    var translatedCaption by remember { mutableStateOf<String?>(null) }
+    var translationError by remember { mutableStateOf<String?>(null) }
     val audioSel by PlayerHolder.audioTrack.collectAsStateCompat()
     val speed by PlayerHolder.speed.collectAsStateCompat()
     val looping by PlayerHolder.looping.collectAsStateCompat()
@@ -145,6 +152,7 @@ fun WatchScreen(
         runCatching { Graph.repo.details(videoId) }
             .onSuccess { d ->
                 details = d
+                selectedSubtitleTrack = d.subtitles.firstOrNull()
                 Graph.store.addHistory(d.video)
                 runCatching { PlayerHolder.play(d, startMs = Graph.store.positionOf(videoId)) }
                     .onFailure { error = errorText(it) }
@@ -155,6 +163,33 @@ fun WatchScreen(
     // Autoplay is handled by PlayerHolder; when it moves on, follow it.
     LaunchedEffect(videoId) {
         PlayerHolder.advanced.collect { id -> if (id != videoId) onVideo(id) }
+    }
+
+    LaunchedEffect(videoId, translationEnabled, selectedSubtitleTrack, translationTarget) {
+        translatedCaption = null
+        translationError = null
+        val track = selectedSubtitleTrack
+        if (!translationEnabled || track == null) return@LaunchedEffect
+        var translator: OnDeviceSubtitleTranslator? = null
+        try {
+            val cues = Graph.repo.subtitleCues(track)
+            translator = OnDeviceSubtitleTranslator.create(track.languageTag, translationTarget)
+            var previousText: String? = null
+            while (true) {
+                val position = PlayerHolder.player.currentPosition
+                val sourceText = cues.firstOrNull { position >= it.startMs && position < it.endMs }?.text
+                if (sourceText != previousText) {
+                    previousText = sourceText
+                    translatedCaption = if (sourceText.isNullOrBlank()) null else translator.translate(sourceText)
+                }
+                kotlinx.coroutines.delay(180)
+            }
+        } catch (error: Throwable) {
+            translationError = error.message ?: "Translation is unavailable for this subtitle track."
+            translatedCaption = null
+        } finally {
+            translator?.close()
+        }
     }
 
     LaunchedEffect(gestureFeedback) {
@@ -262,6 +297,14 @@ fun WatchScreen(
                     modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp)
                         .clip(RoundedCornerShape(16.dp)).background(Color(0xCC000000))
                         .padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+            }
+            translatedCaption?.let { caption ->
+                Text(
+                    caption, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(horizontal = 22.dp, vertical = 58.dp)
+                        .clip(RoundedCornerShape(10.dp)).background(Color(0xD9000000))
+                        .padding(horizontal = 14.dp, vertical = 9.dp)
                 )
             }
             notice?.let {
@@ -425,6 +468,38 @@ fun WatchScreen(
                         sheet = false
                     }
                 }
+            }
+            SheetTitle("Live subtitle translation")
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Translate captions", fontWeight = FontWeight.Medium)
+                    Text("On-device translation · captions required", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(checked = translationEnabled, onCheckedChange = { translationEnabled = it })
+            }
+            if (dd.subtitles.isEmpty()) {
+                Text("No subtitle tracks are available for this video.", modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                SheetTitle("Caption language")
+                dd.subtitles.take(12).forEach { track ->
+                    SheetRow(track.languageName + if (track.autoGenerated) " · auto" else "",
+                        selectedSubtitleTrack?.url == track.url) {
+                        selectedSubtitleTrack = track
+                    }
+                }
+                SheetTitle("Translate into")
+                listOf("en" to "English", "ml" to "Malayalam", "hi" to "Hindi", "ta" to "Tamil",
+                    "te" to "Telugu", "ar" to "Arabic", "fr" to "French", "es" to "Spanish").forEach { (code, label) ->
+                    SheetRow(label, translationTarget == code) { translationTarget = code }
+                }
+            }
+            translationError?.let {
+                Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
             }
             SheetTitle("Playback mode")
             listOf("off" to "Play one", "one" to "Repeat one", "continuous" to "Play continuously").forEach { (mode, label) ->
