@@ -60,7 +60,7 @@ This roadmap turns the agreed recommendations into 21 deliverables. It is an imp
 
 ## Current status
 
-- [x] Existing CI workflow is configured to attempt a debug APK before later quality/release checks.
+- [x] CI uses the committed Gradle Wrapper, runs unit tests and lint first, then builds debug/release; it uploads the debug APK only after successful validation.
 - [ ] Current compiler failure repaired and debug APK verified.
 - [ ] Regression baseline completed.
 - [ ] Deliverables 4–21 implemented and verified in staged releases.
