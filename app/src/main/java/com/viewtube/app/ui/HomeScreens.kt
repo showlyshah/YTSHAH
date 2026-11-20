@@ -49,6 +49,7 @@ import com.viewtube.app.data.Item
 import com.viewtube.app.data.Paged
 import com.viewtube.app.data.VideoItem
 import com.viewtube.app.data.errorText
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 /** Red play-button logo + name, like the YouTube app bar. */
@@ -184,35 +185,77 @@ fun SearchScreen(initialQuery: String, onBack: () -> Unit, onVideo: (VideoItem) 
     var loadingMore by remember { mutableStateOf(false) }
     var pageError by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var reload by remember { mutableIntStateOf(0) }
     val list = rememberLazyListState()
 
     fun run(q: String) {
         if (q.isBlank()) return
-        submitted = q; query = q; suggestions = emptyList()
-        results = emptyList(); next = null; pageError = null
-        scope.launch {
-            loading = true; error = null
-            runCatching { Graph.repo.search(q) }
-                .onSuccess { results = it.items; next = it.next }
-                .onFailure { error = errorText(it); results = emptyList(); next = null }
+        query = q
+        submitted = q
+        suggestions = emptyList()
+        results = emptyList()
+        next = null
+        pageError = null
+        reload++
+    }
+
+    LaunchedEffect(submitted, reload) {
+        if (submitted.isBlank()) return@LaunchedEffect
+        loading = true
+        error = null
+        try {
+            val page = Graph.repo.search(submitted)
+            results = page.items
+            next = page.next
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            error = errorText(failure)
+            results = emptyList()
+            next = null
+        } finally {
             loading = false
         }
     }
 
-    LaunchedEffect(Unit) { if (initialQuery.isNotBlank()) run(initialQuery) }
     LaunchedEffect(query) {
-        if (query == submitted || query.isBlank()) { suggestions = emptyList(); return@LaunchedEffect }
+        val requested = query
+        if (requested == submitted || requested.isBlank()) {
+            suggestions = emptyList()
+            return@LaunchedEffect
+        }
         kotlinx.coroutines.delay(250)
-        suggestions = Graph.repo.suggestions(query).take(8)
+        try {
+            val found = Graph.repo.suggestions(requested).take(8)
+            if (query == requested && submitted != requested) suggestions = found
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            if (query == requested) suggestions = emptyList()
+        }
     }
 
     LoadMoreEffect(list, next != null && !loadingMore && pageError == null) {
         val n = next ?: return@LoadMoreEffect
         loadingMore = true
         scope.launch {
-            runCatching { n() }.onSuccess { results = (results + it.items).distinctBy { item -> when (item) { is VideoItem -> "v:${item.id}"; is ChannelItem -> "c:${item.id}" } }; next = it.next; pageError = null }
-                .onFailure { pageError = errorText(it) }
-            loadingMore = false
+            try {
+                val page = n()
+                results = (results + page.items).distinctBy { item ->
+                    when (item) {
+                        is VideoItem -> "v:\${item.id}"
+                        is ChannelItem -> "c:\${item.id}"
+                    }
+                }
+                next = page.next
+                pageError = null
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                pageError = errorText(failure)
+            } finally {
+                loadingMore = false
+            }
         }
     }
 
@@ -220,10 +263,10 @@ fun SearchScreen(initialQuery: String, onBack: () -> Unit, onVideo: (VideoItem) 
         SearchBar(query, onChange = { query = it }, onSubmit = { run(query) }, onBack = onBack)
         when {
             suggestions.isNotEmpty() -> LazyColumn {
-                items(suggestions) { s ->
-                    Row(Modifier.fillMaxWidth().clickable { run(s) }.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                items(suggestions) { suggestion ->
+                    Row(Modifier.fillMaxWidth().clickable { run(suggestion) }.padding(horizontal = 16.dp, vertical = 14.dp)) {
                         Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
-                        Text(s, modifier = Modifier.padding(start = 16.dp))
+                        Text(suggestion, modifier = Modifier.padding(start = 16.dp))
                     }
                 }
             }
@@ -231,10 +274,10 @@ fun SearchScreen(initialQuery: String, onBack: () -> Unit, onVideo: (VideoItem) 
             error != null -> Message("Search failed", error, "Try again") { run(submitted) }
             submitted.isNotBlank() && results.isEmpty() -> Message("No results for \"$submitted\"")
             else -> LazyColumn(Modifier.fillMaxSize(), state = list) {
-                items(results.size) { i ->
-                    when (val it = results[i]) {
-                        is VideoItem -> VideoRow(it) { onVideo(it) }
-                        is ChannelItem -> ChannelRow(it) { onChannel(it.url) }
+                items(results.size) { index ->
+                    when (val resultItem = results[index]) {
+                        is VideoItem -> VideoRow(resultItem) { onVideo(resultItem) }
+                        is ChannelItem -> ChannelRow(resultItem) { onChannel(resultItem.url) }
                     }
                 }
                 if (loadingMore) item { Loading(Modifier.fillMaxWidth().height(64.dp)) }
