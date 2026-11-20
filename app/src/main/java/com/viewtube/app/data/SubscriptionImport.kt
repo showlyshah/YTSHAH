@@ -28,7 +28,7 @@ object SubscriptionImport {
         return (0 until arr.length()).mapNotNull {
             val o = arr.getJSONObject(it)
             if (o.optInt("service_id", 0) != 0) return@mapNotNull null
-            val id = o.optString("url").substringAfterLast('/')
+            val id = o.optString("url").substringAfterLast('/').substringBefore('?').substringBefore('#')
             ChannelItem(id, channelUrl(id), o.optString("name"), null)
         }
     }
