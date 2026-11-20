@@ -147,7 +147,7 @@ fun WatchScreen(
         comments = null; commentList = emptyList(); showDesc = false
         // Re-opening the video that is already playing (from the mini player): keep it going.
         val cur = PlayerHolder.current.value
-        if (cur != null && cur.video.id == videoId) { details = cur; return@LaunchedEffect }
+        if (cur != null && cur.video.id == videoId) { details = cur; selectedSubtitleTrack = cur.subtitles.firstOrNull(); return@LaunchedEffect }
         details = null
         runCatching { Graph.repo.details(videoId) }
             .onSuccess { d ->
@@ -225,7 +225,7 @@ fun WatchScreen(
             var drag = 0f
             detectVerticalDragGestures(onVerticalDrag = { _, amount ->
                 drag += amount
-                if (fullscreen && drag > 70f) { onBack(); drag = 0f }
+                if (immersivePlayer && drag > 70f) { onBack(); drag = 0f }
             }, onDragEnd = { drag = 0f })
         }) {
             AndroidView(
@@ -247,9 +247,14 @@ fun WatchScreen(
                 IconButton(onClick = { sheet = true }, modifier = Modifier.size(38.dp)) {
                     Icon(Icons.Default.MoreVert, contentDescription = "Player options", tint = Color.White, modifier = Modifier.size(19.dp))
                 }
-                IconButton(onClick = { fullscreen = !fullscreen }, modifier = Modifier.size(38.dp)) {
-                    Icon(if (fullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                        contentDescription = if (fullscreen) "Exit fullscreen" else "Fullscreen",
+                IconButton(onClick = {
+                    if (immersivePlayer) {
+                        fullscreen = false
+                        ctx.activity()?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                    } else fullscreen = true
+                }, modifier = Modifier.size(38.dp)) {
+                    Icon(if (immersivePlayer) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                        contentDescription = if (immersivePlayer) "Exit fullscreen" else "Fullscreen",
                         tint = Color.White, modifier = Modifier.size(20.dp))
                 }
             }
