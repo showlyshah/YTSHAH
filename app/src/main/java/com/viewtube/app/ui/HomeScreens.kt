@@ -100,6 +100,7 @@ fun HomeScreen(
 
     LaunchedEffect(reload, subs.map { it.id }) {
         loading = true
+        loadingMore = false
         error = null
         pageError = null
         canLoadMore = false
@@ -127,16 +128,32 @@ fun HomeScreen(
     }
 
     LoadMoreEffect(listState, canLoadMore && !loadingMore) {
+        val generationReload = reload
+        val generationSubs = subs.map { it.id }
         loadingMore = true
         scope.launch {
-            val page = mixer.more(12)
-            if (page.isNotEmpty()) {
-                val existing = videos.mapTo(HashSet()) { it.id }
-                videos = videos + page.filter { existing.add(it.id) }
+            try {
+                val page = mixer.more(12)
+                if (reload == generationReload && Graph.store.subs.value.map { it.id } == generationSubs) {
+                    if (page.isNotEmpty()) {
+                        val existing = videos.mapTo(HashSet()) { it.id }
+                        videos = videos + page.filter { existing.add(it.id) }
+                    }
+                    pageError = mixer.lastError?.let(::errorText)
+                    canLoadMore = !mixer.exhausted && mixer.lastError == null
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                if (reload == generationReload && Graph.store.subs.value.map { it.id } == generationSubs) {
+                    pageError = errorText(failure)
+                    canLoadMore = false
+                }
+            } finally {
+                if (reload == generationReload && Graph.store.subs.value.map { it.id } == generationSubs) {
+                    loadingMore = false
+                }
             }
-            pageError = mixer.lastError?.let(::errorText)
-            canLoadMore = !mixer.exhausted && mixer.lastError == null
-            loadingMore = false
         }
     }
 
