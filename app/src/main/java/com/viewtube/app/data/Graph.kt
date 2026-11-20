@@ -14,8 +14,6 @@ object Graph {
     lateinit var http: OkHttpClient; private set
     lateinit var repo: YouTubeRepo; private set
     lateinit var store: LocalStore; private set
-    lateinit var secure: SecureStore; private set
-    lateinit var piped: PipedClient; private set
     lateinit var sponsor: SponsorBlock; private set
 
     fun init(context: Context) {
@@ -34,9 +32,7 @@ object Graph {
         )
 
         store = LocalStore(app)
-        secure = SecureStore(app)
         repo = YouTubeRepo(http)
-        piped = PipedClient(http, secure, store)
         sponsor = SponsorBlock(http)
         com.viewtube.app.player.PlayerHolder.init(app)
     }
