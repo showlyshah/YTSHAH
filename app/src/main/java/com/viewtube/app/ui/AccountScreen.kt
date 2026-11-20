@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -59,6 +60,7 @@ fun AccountScreen(onBack: () -> Unit) {
     val autoplay by store.autoplayNext.collectAsStateCompat()
     val personalized by store.personalizedRecommendations.collectAsStateCompat()
     val cloudAiEnabled by store.cloudAiEnabled.collectAsStateCompat()
+    val themeMode by store.themeMode.collectAsStateCompat()
     val subs by store.subs.collectAsStateCompat()
     val history by store.history.collectAsStateCompat()
     val later by store.later.collectAsStateCompat()
@@ -197,6 +199,19 @@ fun AccountScreen(onBack: () -> Unit) {
                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }) { Text("Import subscriptions file") }
+        }
+
+        Section("Appearance") {
+            Text("Choose how ViewTube looks.")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("system", "light", "dark").forEach { mode ->
+                    FilterChip(
+                        selected = themeMode == mode,
+                        onClick = { store.setThemeMode(mode) },
+                        label = { Text(mode.replaceFirstChar { it.uppercase() }) }
+                    )
+                }
+            }
         }
 
         Section("Discovery") {
