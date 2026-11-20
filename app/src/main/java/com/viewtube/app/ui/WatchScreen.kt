@@ -4,9 +4,11 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.media.AudioManager
 import kotlin.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -45,6 +47,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -101,6 +104,7 @@ fun WatchScreen(
     var aiText by remember { mutableStateOf<String?>(null) }
     var aiQuestion by remember { mutableStateOf("") }
     var useCloudForAi by remember { mutableStateOf(false) }
+    var gestureFeedback by remember { mutableStateOf<String?>(null) }
     val audioSel by PlayerHolder.audioTrack.collectAsStateCompat()
     val speed by PlayerHolder.speed.collectAsStateCompat()
     val looping by PlayerHolder.looping.collectAsStateCompat()
@@ -132,6 +136,13 @@ fun WatchScreen(
     // Autoplay is handled by PlayerHolder; when it moves on, follow it.
     LaunchedEffect(videoId) {
         PlayerHolder.advanced.collect { id -> if (id != videoId) onVideo(id) }
+    }
+
+    LaunchedEffect(gestureFeedback) {
+        if (gestureFeedback != null) {
+            kotlinx.coroutines.delay(1200)
+            gestureFeedback = null
+        }
     }
 
     // Fullscreen = landscape + hidden system bars.
@@ -173,6 +184,52 @@ fun WatchScreen(
             )
             if (!fullscreen) IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart)) {
                 Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Minimize", tint = Color.White)
+            }
+            Box(
+                Modifier.align(Alignment.CenterStart).fillMaxWidth(0.18f).fillMaxSize()
+                    .pointerInput(videoId) {
+                        var accumulated = 0f
+                        detectVerticalDragGestures { _, amount ->
+                            accumulated += amount
+                            if (kotlin.math.abs(accumulated) >= 28f) {
+                                ctx.activity()?.let { activity ->
+                                    val params = activity.window.attributes
+                                    val old = params.screenBrightness.takeIf { it >= 0f } ?: 0.5f
+                                    params.screenBrightness = (old - accumulated / 500f).coerceIn(0.05f, 1f)
+                                    activity.window.attributes = params
+                                    gestureFeedback = "Brightness ${(params.screenBrightness * 100).toInt()}%"
+                                }
+                                accumulated = 0f
+                            }
+                        }
+                    }
+            )
+            Box(
+                Modifier.align(Alignment.CenterEnd).fillMaxWidth(0.18f).fillMaxSize()
+                    .pointerInput(videoId) {
+                        var accumulated = 0f
+                        detectVerticalDragGestures { _, amount ->
+                            accumulated += amount
+                            if (kotlin.math.abs(accumulated) >= 28f) {
+                                val audio = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                                audio.adjustStreamVolume(
+                                    AudioManager.STREAM_MUSIC,
+                                    if (accumulated < 0) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER,
+                                    0
+                                )
+                                gestureFeedback = "Volume ${audio.getStreamVolume(AudioManager.STREAM_MUSIC) * 100 / audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)}%"
+                                accumulated = 0f
+                            }
+                        }
+                    }
+            )
+            gestureFeedback?.let {
+                Text(
+                    it, color = Color.White, fontSize = 13.sp,
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp)
+                        .clip(RoundedCornerShape(16.dp)).background(Color(0xCC000000))
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                )
             }
             notice?.let {
                 Text(
