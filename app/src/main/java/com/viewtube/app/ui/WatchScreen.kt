@@ -100,6 +100,7 @@ fun WatchScreen(
 ) {
     val ctx = LocalContext.current
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    var fullscreen by remember { mutableStateOf(false) }
     val immersivePlayer = fullscreen || landscape
     val hdrDisplaySupported = remember(ctx) {
         runCatching {
@@ -111,7 +112,6 @@ fun WatchScreen(
     var details by remember { mutableStateOf<VideoDetails?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var attempt by remember { mutableStateOf(0) }
-    var fullscreen by remember { mutableStateOf(false) }
     var comments by remember { mutableStateOf<Paged<Comment>?>(null) }
     var commentList by remember { mutableStateOf<List<Comment>>(emptyList()) }
     var loadingComments by remember { mutableStateOf(false) }
