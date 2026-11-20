@@ -65,6 +65,10 @@ object PlayerHolder {
 
     private val _speed = MutableStateFlow(1f)
     val speed: StateFlow<Float> = _speed.asStateFlow()
+    private val _looping = MutableStateFlow(false)
+    val looping: StateFlow<Boolean> = _looping.asStateFlow()
+    private val _audioOnly = MutableStateFlow(false)
+    val audioOnly: StateFlow<Boolean> = _audioOnly.asStateFlow()
 
     /** Fired with the video id when autoplay moved on to the next video by itself. */
     private val _advanced = MutableSharedFlow<String>(extraBufferCapacity = 1)
@@ -257,9 +261,31 @@ object PlayerHolder {
 
     fun toggle() { if (player.playWhenReady) player.pause() else player.play() }
 
-    fun setSpeed(s: Float) { _speed.value = s; player.setPlaybackSpeed(s) }
+    fun setSpeed(s: Float) {
+        val safe = s.coerceIn(0.25f, 3f)
+        _speed.value = safe
+        player.setPlaybackSpeed(safe)
+    }
 
-    fun setLooping(on: Boolean) { looping = on; player.repeatMode = if (on) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF }
+    fun seekBy(deltaMs: Long) {
+        val duration = player.duration
+        val target = (player.currentPosition + deltaMs).coerceAtLeast(0L)
+        player.seekTo(if (duration > 0L) target.coerceAtMost(duration) else target)
+    }
+
+    fun setLooping(on: Boolean) {
+        looping = on
+        _looping.value = on
+        player.repeatMode = if (on) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+    }
+
+    /** Disables only the video renderer; audio continues through the same media session. */
+    fun setAudioOnly(on: Boolean) {
+        _audioOnly.value = on
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, on)
+            .build()
+    }
 
     // ---------------------------------------------------------- sponsor skipping
 
