@@ -40,6 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -90,7 +91,7 @@ fun WatchScreen(
     val scope = rememberCoroutineScope()
     var details by remember { mutableStateOf<VideoDetails?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    var attempt by remember { mutableStateOf(0) }
+    var attempt by remember { mutableIntStateOf(0) }
     var fullscreen by remember { mutableStateOf(false) }
     var comments by remember { mutableStateOf<Paged<Comment>?>(null) }
     var commentList by remember { mutableStateOf<List<Comment>>(emptyList()) }
