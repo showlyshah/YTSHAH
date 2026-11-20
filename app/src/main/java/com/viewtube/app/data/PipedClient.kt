@@ -30,8 +30,10 @@ class PipedClient(
     private fun api(): String {
         val parsed = store.pipedServer.value.trim().toHttpUrlOrNull()
             ?: throw IOException("Enter a valid HTTPS sync-server URL.")
-        if (parsed.scheme != "https" || parsed.username.isNotEmpty() || parsed.password.isNotEmpty()) {
-            throw IOException("The sync server must use HTTPS and must not contain embedded credentials.")
+        if (parsed.scheme != "https" || parsed.username.isNotEmpty() || parsed.password.isNotEmpty() ||
+            parsed.encodedQuery != null || parsed.fragment != null
+        ) {
+            throw IOException("Use an HTTPS server address without embedded credentials, query parameters or fragments.")
         }
         return parsed.toString().trimEnd('/')
     }
