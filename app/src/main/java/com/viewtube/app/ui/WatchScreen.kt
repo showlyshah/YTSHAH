@@ -30,6 +30,10 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -108,6 +112,8 @@ fun WatchScreen(
     val audioSel by PlayerHolder.audioTrack.collectAsStateCompat()
     val speed by PlayerHolder.speed.collectAsStateCompat()
     val looping by PlayerHolder.looping.collectAsStateCompat()
+    val repeatMode by PlayerHolder.repeatMode.collectAsStateCompat()
+    val sleepRemaining by PlayerHolder.sleepRemainingMs.collectAsStateCompat()
     val audioOnly by PlayerHolder.audioOnly.collectAsStateCompat()
     val prefHeight by Graph.store.preferredHeight.collectAsStateCompat()
     val prefAudioBitrate by Graph.store.preferredAudioBitrate.collectAsStateCompat()
@@ -170,7 +176,13 @@ fun WatchScreen(
     androidx.activity.compose.BackHandler(enabled = fullscreen) { fullscreen = false }
 
     val playerBox: @Composable (Modifier) -> Unit = { mod ->
-        Box(mod.background(Color.Black)) {
+        Box(mod.background(Color.Black).pointerInput(fullscreen) {
+            var drag = 0f
+            detectVerticalDragGestures(onVerticalDrag = { _, amount ->
+                drag += amount
+                if (fullscreen && drag > 70f) { fullscreen = false; drag = 0f }
+            }, onDragEnd = { drag = 0f })
+        }) {
             AndroidView(
                 factory = { c ->
                     PlayerView(c).apply {
@@ -185,6 +197,16 @@ fun WatchScreen(
             )
             if (!fullscreen) IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart)) {
                 Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Minimize", tint = Color.White)
+            }
+            Row(Modifier.align(Alignment.TopEnd).padding(3.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { sheet = true }, modifier = Modifier.size(38.dp)) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "Player options", tint = Color.White, modifier = Modifier.size(19.dp))
+                }
+                IconButton(onClick = { fullscreen = !fullscreen }, modifier = Modifier.size(38.dp)) {
+                    Icon(if (fullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                        contentDescription = if (fullscreen) "Exit fullscreen" else "Fullscreen",
+                        tint = Color.White, modifier = Modifier.size(20.dp))
+                }
             }
             Box(
                 Modifier.align(Alignment.CenterStart).fillMaxWidth(0.18f).fillMaxSize()
@@ -395,6 +417,22 @@ fun WatchScreen(
                     }
                 }
             }
+            SheetTitle("Playback mode")
+            listOf("off" to "Play one", "one" to "Repeat one", "continuous" to "Play continuously").forEach { (mode, label) ->
+                SheetRow(label, repeatMode == mode) { PlayerHolder.setRepeatMode(mode) }
+            }
+            SheetTitle("Sleep timer")
+            val remainingMinutes = sleepRemaining?.let { (it / 60000L).toInt().coerceAtLeast(1) }
+            Text(if (remainingMinutes != null) "Stops playback in about $remainingMinutes min" else "No sleep timer set",
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            listOf(15, 30, 45, 60, 90).forEach { mins ->
+                SheetRow("$mins minutes", remainingMinutes == mins) { PlayerHolder.setSleepTimer(mins) }
+            }
+            if (sleepRemaining != null) SheetRow("Cancel sleep timer", false) { PlayerHolder.cancelSleepTimer() }
+            SheetTitle("HDR")
+            Text("HDR is used automatically when the selected source and this device/display support it. ViewTube will not force HDR on SDR streams.",
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp), fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
             SheetTitle("Playback speed")
             listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f).forEach { sp ->
                 SheetRow(if (sp == 1f) "Normal" else "${sp}x", speed == sp) { PlayerHolder.setSpeed(sp); sheet = false }
