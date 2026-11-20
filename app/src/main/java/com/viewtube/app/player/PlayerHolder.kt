@@ -76,6 +76,7 @@ object PlayerHolder {
     private var segments: List<SponsorBlock.Segment> = emptyList()
     private var watcher: Job? = null
     private var saver: Job? = null
+    private var segmentJob: Job? = null
 
     fun init(context: Context) {
         appContext = context.applicationContext
@@ -130,7 +131,7 @@ object PlayerHolder {
 
     /** Qualities the viewer can choose from, best first. */
     fun heights(d: VideoDetails): List<Int> =
-        (d.videoOnly.map { it.height } + d.muxed.map { it.height })
+        (d.videoOnly.filter { it.deliveryMethod != DeliveryMethod.TORRENT }.map { it.height } + d.muxed.filter { it.deliveryMethod != DeliveryMethod.TORRENT }.map { it.height })
             .filter { it > 0 }.distinct().sortedDescending()
 
     /** The user's preferred height, else 480p on mobile data and 720p on Wi-Fi. */
@@ -147,7 +148,7 @@ object PlayerHolder {
 
     /** Audio languages / tracks on offer for this video: id to label. Empty when there is only one. */
     fun audioOptions(d: VideoDetails): List<Pair<String, String>> =
-        d.audio.filter { it.audioTrackId != null }
+        d.audio.filter { it.audioTrackId != null && it.deliveryMethod != DeliveryMethod.TORRENT }
             .distinctBy { it.audioTrackId }
             .map { (it.audioTrackId ?: "") to (it.audioTrackName ?: it.audioLocale?.displayName ?: it.audioTrackId ?: "Track") }
             .let { if (it.size > 1) it else emptyList() }
@@ -214,19 +215,20 @@ object PlayerHolder {
             val audio = bestAudio(d.audio, audioTrackId)
             val videoOnly = bestVideo(d.videoOnly, wantedHeight)
             val muxed = bestVideo(d.muxed, wantedHeight)
+            val playableMuxed = d.muxed.filter { it.deliveryMethod != DeliveryMethod.TORRENT }
             val chosen: MediaSource? = when {
                 videoOnly != null && audio != null ->
                     MergingMediaSource(mediaSource(videoOnly, item), mediaSource(audio, item))
                 muxed != null -> mediaSource(muxed, item)
                 // Nothing at that exact height: use the best muxed stream, or audio only.
-                d.muxed.isNotEmpty() -> mediaSource(d.muxed.maxBy { it.height }, item)
+                playableMuxed.isNotEmpty() -> mediaSource(playableMuxed.maxBy { it.height }, item)
                 audio != null -> mediaSource(audio, item)
                 else -> null
             }
             requireNotNull(chosen) { "This video has no playable streams (it may be restricted)." }
             source = chosen
             _height.value = if (videoOnly != null && audio != null) videoOnly.height
-            else muxed?.height ?: d.muxed.maxOfOrNull { it.height } ?: 0
+            else muxed?.height ?: playableMuxed.maxOfOrNull { it.height } ?: 0
         }
 
         _current.value = d
@@ -243,7 +245,7 @@ object PlayerHolder {
 
     fun stop() {
         saveProgress()
-        watcher?.cancel(); saver?.cancel()
+        watcher?.cancel(); saver?.cancel(); segmentJob?.cancel(); segmentJob = null
         player.stop()
         player.clearMediaItems()
         _current.value = null
@@ -261,9 +263,13 @@ object PlayerHolder {
     // ---------------------------------------------------------- sponsor skipping
 
     private fun loadSegments(id: String) {
+        segmentJob?.cancel()
         segments = emptyList()
         if (!Graph.store.sponsorSkip.value) return
-        scope.launch { segments = Graph.sponsor.segments(id) }
+        segmentJob = scope.launch {
+            val loaded = Graph.sponsor.segments(id)
+            if (_current.value?.video?.id == id) segments = loaded
+        }
     }
 
     private fun startWatching(d: VideoDetails) {
