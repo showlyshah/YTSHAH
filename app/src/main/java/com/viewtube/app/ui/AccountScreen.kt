@@ -58,6 +58,7 @@ fun AccountScreen(onBack: () -> Unit) {
     val sponsor by store.sponsorSkip.collectAsStateCompat()
     val autoplay by store.autoplayNext.collectAsStateCompat()
     val personalized by store.personalizedRecommendations.collectAsStateCompat()
+    val cloudAiEnabled by store.cloudAiEnabled.collectAsStateCompat()
     val subs by store.subs.collectAsStateCompat()
 
     var nameField by remember(name) { mutableStateOf(name) }
@@ -67,6 +68,9 @@ fun AccountScreen(onBack: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
     var confirmWipe by remember { mutableStateOf(false) }
+    var aiBaseUrl by remember { mutableStateOf(Graph.secure.get(com.viewtube.app.data.OpenAiCompatibleProvider.KEY_BASE_URL) ?: com.viewtube.app.data.OpenAiCompatibleProvider.DEFAULT_BASE_URL) }
+    var aiModel by remember { mutableStateOf(Graph.secure.get(com.viewtube.app.data.OpenAiCompatibleProvider.KEY_MODEL) ?: com.viewtube.app.data.OpenAiCompatibleProvider.DEFAULT_MODEL) }
+    var aiKey by remember { mutableStateOf("") }
 
     val backupExport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -187,6 +191,52 @@ fun AccountScreen(onBack: () -> Unit) {
         Section("Playback") {
             ToggleRow("Skip sponsor & promo segments", "Uses the community SponsorBlock list", sponsor) { store.setSponsorSkip(it) }
             ToggleRow("Autoplay next video", null, autoplay) { store.setAutoplayNext(it) }
+        }
+
+        Section("Hybrid AI intelligence") {
+            Text(
+                "Local topic analysis and description-based assistance work on-device. A cloud provider is optional. " +
+                    "Your API key is encrypted with Android Keystore and is never included in backups.",
+                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            OutlinedTextField(
+                aiBaseUrl, { aiBaseUrl = it },
+                label = { Text("OpenAI-compatible HTTPS endpoint") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                singleLine = true, modifier = Modifier.fillMaxWidth()
+            )
+            OutlinedTextField(
+                aiModel, { aiModel = it }, label = { Text("Model name") },
+                singleLine = true, modifier = Modifier.fillMaxWidth()
+            )
+            OutlinedTextField(
+                aiKey, { aiKey = it }, label = { Text("API key (leave blank to keep saved key)") },
+                singleLine = true, visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = {
+                    runCatching {
+                        require(aiBaseUrl.startsWith("https://", true)) { "Use an HTTPS endpoint." }
+                        require(aiModel.isNotBlank()) { "Enter a model name." }
+                        Graph.secure.put(com.viewtube.app.data.OpenAiCompatibleProvider.KEY_BASE_URL, aiBaseUrl.trim())
+                        Graph.secure.put(com.viewtube.app.data.OpenAiCompatibleProvider.KEY_MODEL, aiModel.trim())
+                        if (aiKey.isNotBlank()) Graph.secure.put(com.viewtube.app.data.OpenAiCompatibleProvider.KEY_API_KEY, aiKey.trim())
+                        aiKey = ""
+                        status = "AI provider settings saved securely."
+                    }.onFailure { status = it.message ?: "Could not save AI settings." }
+                }) { Text("Save AI settings") }
+                OutlinedButton(onClick = {
+                    Graph.secure.put(com.viewtube.app.data.OpenAiCompatibleProvider.KEY_API_KEY, null)
+                    aiKey = ""
+                    status = "Saved AI API key removed."
+                }) { Text("Remove key") }
+            }
+            ToggleRow(
+                "Enable optional cloud AI",
+                "Cloud requests still require explicit approval for each AI action.",
+                cloudAiEnabled
+            ) { store.setCloudAiEnabled(it) }
         }
 
         Section("Backup & restore") {
