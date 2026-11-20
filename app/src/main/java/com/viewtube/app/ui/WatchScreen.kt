@@ -4,7 +4,6 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
-import android.view.View
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -24,8 +23,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -47,7 +51,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.util.UnstableApi
@@ -71,7 +74,7 @@ private fun Context.activity(): Activity? {
     return null
 }
 
-@OptIn(UnstableApi::class)
+@OptIn(UnstableApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun WatchScreen(
     videoId: String,
@@ -89,35 +92,35 @@ fun WatchScreen(
     var commentList by remember { mutableStateOf<List<Comment>>(emptyList()) }
     var loadingComments by remember { mutableStateOf(false) }
     var showDesc by remember { mutableStateOf(false) }
-    var qualityMenu by remember { mutableStateOf(false) }
+    var sheet by remember { mutableStateOf(false) }
+    val audioSel by PlayerHolder.audioTrack.collectAsStateCompat()
+    val speed by PlayerHolder.speed.collectAsStateCompat()
+    val prefHeight by Graph.store.preferredHeight.collectAsStateCompat()
     val height by PlayerHolder.height.collectAsStateCompat()
     val notice by PlayerHolder.skipNotice.collectAsStateCompat()
     val subs by Graph.store.subs.collectAsStateCompat()
     val later by Graph.store.later.collectAsStateCompat()
-    val autoplay by Graph.store.autoplayNext.collectAsStateCompat()
 
     LaunchedEffect(videoId, attempt) {
         error = null
         comments = null; commentList = emptyList(); showDesc = false
+        // Re-opening the video that is already playing (from the mini player): keep it going.
+        val cur = PlayerHolder.current.value
+        if (cur != null && cur.video.id == videoId) { details = cur; return@LaunchedEffect }
+        details = null
         runCatching { Graph.repo.details(videoId) }
             .onSuccess { d ->
                 details = d
                 Graph.store.addHistory(d.video)
-                val alreadyPlaying = PlayerHolder.current.value?.video?.id == videoId
-                if (!alreadyPlaying) {
-                    runCatching { PlayerHolder.play(d, startMs = Graph.store.positionOf(videoId)) }
-                        .onFailure { error = errorText(it) }
-                }
+                runCatching { PlayerHolder.play(d, startMs = Graph.store.positionOf(videoId)) }
+                    .onFailure { error = errorText(it) }
             }
             .onFailure { error = errorText(it) }
     }
 
-    // Move on to the next suggested video when this one ends.
-    DisposableEffect(videoId, details, autoplay) {
-        val l = PlayerHolder.addEndedListener {
-            if (autoplay) details?.related?.firstOrNull()?.let { onVideo(it.id) }
-        }
-        onDispose { PlayerHolder.removeListener(l) }
+    // Autoplay is handled by PlayerHolder; when it moves on, follow it.
+    LaunchedEffect(videoId) {
+        PlayerHolder.advanced.collect { id -> if (id != videoId) onVideo(id) }
     }
 
     // Fullscreen = landscape + hidden system bars.
@@ -157,6 +160,9 @@ fun WatchScreen(
                 update = { it.player = PlayerHolder.player },
                 modifier = Modifier.fillMaxSize()
             )
+            if (!fullscreen) IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart)) {
+                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Minimize", tint = Color.White)
+            }
             notice?.let {
                 Text(
                     it, color = Color.White, fontSize = 13.sp,
@@ -217,17 +223,10 @@ fun WatchScreen(
                                 }, "Share"))
                             }, label = { Text("Share") })
                             Spacer(Modifier.width(8.dp))
-                            if (!d.isLive) Box {
-                                AssistChip(onClick = { qualityMenu = true }, label = { Text(if (height > 0) "${height}p" else "Quality") })
-                                DropdownMenu(expanded = qualityMenu, onDismissRequest = { qualityMenu = false }) {
-                                    PlayerHolder.heights(d).forEach { h ->
-                                        DropdownMenuItem(text = { Text("${h}p") }, onClick = {
-                                            qualityMenu = false
-                                            runCatching { PlayerHolder.play(d, h) }.onFailure { error = errorText(it) }
-                                        })
-                                    }
-                                }
-                            }
+                            if (!d.isLive) AssistChip(
+                                onClick = { sheet = true },
+                                label = { Text(if (height > 0) "${height}p" else "Quality") }
+                            )
                         }
                     }
                 }
@@ -260,18 +259,46 @@ fun WatchScreen(
             }
         }
     }
+    val dd = details
+    if (sheet && dd != null) ModalBottomSheet(onDismissRequest = { sheet = false }) {
+        Column(Modifier.padding(bottom = 24.dp)) {
+            SheetTitle("Quality")
+            val heights = PlayerHolder.heights(dd)
+            SheetRow("Auto (recommended)", prefHeight == 0) {
+                Graph.store.setPreferredHeight(0)
+                runCatching { PlayerHolder.play(dd, PlayerHolder.defaultHeight(dd)) }.onFailure { error = errorText(it) }
+                sheet = false
+            }
+            heights.forEach { h ->
+                SheetRow("${h}p", height == h && prefHeight != 0) {
+                    Graph.store.setPreferredHeight(h)
+                    runCatching { PlayerHolder.play(dd, h) }.onFailure { error = errorText(it) }
+                    sheet = false
+                }
+            }
+            val tracks = PlayerHolder.audioOptions(dd)
+            if (tracks.isNotEmpty()) {
+                SheetTitle("Audio track")
+                tracks.forEach { (id, label) ->
+                    SheetRow(label, audioSel == id) {
+                        runCatching { PlayerHolder.play(dd, height.takeIf { it > 0 } ?: PlayerHolder.defaultHeight(dd), audioTrackId = id) }
+                            .onFailure { error = errorText(it) }
+                        sheet = false
+                    }
+                }
+            }
+            SheetTitle("Playback speed")
+            listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f).forEach { sp ->
+                SheetRow(if (sp == 1f) "Normal" else "${sp}x", speed == sp) { PlayerHolder.setSpeed(sp); sheet = false }
+            }
+        }
+    }
 }
 
 @Composable
 fun SubscribeButton(channel: com.viewtube.app.data.ChannelItem, subscribed: Boolean) {
-    val scope = rememberCoroutineScope()
     val shape = RoundedCornerShape(20.dp)
-    val act = {
-        val now = Graph.store.toggleSub(channel)
-        if (Graph.piped.isSignedIn) scope.launch {
-            runCatching { if (now) Graph.piped.subscribe(channel.id) else Graph.piped.unsubscribe(channel.id) }
-        }
-    }
+    val act = { Graph.store.toggleSub(channel); Unit }
     if (subscribed) OutlinedButton(onClick = act, shape = shape) { Text("Subscribed") }
     else Button(onClick = act, shape = shape, colors = ButtonDefaults.buttonColors(
         containerColor = MaterialTheme.colorScheme.onBackground, contentColor = MaterialTheme.colorScheme.background
@@ -312,5 +339,18 @@ private fun CommentsSection(
             }
         }
         Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun SheetTitle(t: String) {
+    Text(t, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 4.dp))
+}
+
+@Composable
+private fun SheetRow(label: String, selected: Boolean, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f))
+        if (selected) Icon(Icons.Default.Check, contentDescription = "Selected", tint = YtRed)
     }
 }

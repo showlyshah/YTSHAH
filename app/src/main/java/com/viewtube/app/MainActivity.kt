@@ -12,13 +12,16 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.SmartDisplay
 import androidx.compose.material.icons.filled.Subscriptions
-import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -41,17 +44,20 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.viewtube.app.data.Graph
 import com.viewtube.app.data.videoIdFromUrl
 import com.viewtube.app.player.PlayerHolder
-import com.viewtube.app.ui.AccountScreen
 import com.viewtube.app.ui.ChannelScreen
+import com.viewtube.app.ui.CreatorsScreen
 import com.viewtube.app.ui.HomeScreen
-import com.viewtube.app.ui.LibraryScreen
+import com.viewtube.app.ui.MiniPlayer
 import com.viewtube.app.ui.SearchScreen
+import com.viewtube.app.ui.SettingsScreen
+import com.viewtube.app.ui.ShortsScreen
 import com.viewtube.app.ui.SubscriptionsScreen
+import com.viewtube.app.ui.VideoListScreen
 import com.viewtube.app.ui.ViewTubeTheme
 import com.viewtube.app.ui.WatchScreen
+import com.viewtube.app.ui.YouScreen
 import com.viewtube.app.ui.YtRed
 
 @UnstableApi
@@ -113,7 +119,7 @@ class MainActivity : ComponentActivity() {
         val nav = rememberNavController()
         val backStack by nav.currentBackStackEntryAsState()
         val route = backStack?.destination?.route.orEmpty()
-        onWatchScreen = route.startsWith("watch")
+        onWatchScreen = route.startsWith("watch/")
 
         LaunchedEffect(pendingVideo) {
             pendingVideo?.let { nav.navigate("watch/$it"); pendingVideo = null }
@@ -121,31 +127,36 @@ class MainActivity : ComponentActivity() {
 
         val tabs = listOf(
             Triple("home", "Home", Icons.Default.Home),
+            Triple("shorts", "Shorts", Icons.Default.SmartDisplay),
             Triple("subs", "Subscriptions", Icons.Default.Subscriptions),
-            Triple("library", "Library", Icons.Default.VideoLibrary),
+            Triple("creators", "Creators", Icons.Default.People),
+            Triple("you", "You", Icons.Default.AccountCircle),
         )
         val showBar = route in tabs.map { it.first }
 
         Scaffold(
             containerColor = androidx.compose.material3.MaterialTheme.colorScheme.background,
             bottomBar = {
-                if (showBar) NavigationBar(containerColor = androidx.compose.material3.MaterialTheme.colorScheme.background) {
-                    tabs.forEach { (r, label, icon) ->
-                        NavigationBarItem(
-                            selected = route == r,
-                            onClick = {
-                                nav.navigate(r) {
-                                    popUpTo("home") { saveState = true }
-                                    launchSingleTop = true; restoreState = true
-                                }
-                            },
-                            icon = { Icon(icon, contentDescription = label) },
-                            label = { Text(label) },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = YtRed, selectedTextColor = YtRed,
-                                indicatorColor = Color.Transparent
+                Column {
+                    if (!route.startsWith("watch/") && route != "shorts") MiniPlayer { id -> nav.navigate("watch/$id") }
+                    if (showBar) NavigationBar(containerColor = androidx.compose.material3.MaterialTheme.colorScheme.background) {
+                        tabs.forEach { (r, label, icon) ->
+                            NavigationBarItem(
+                                selected = route == r,
+                                onClick = {
+                                    nav.navigate(r) {
+                                        popUpTo("home") { saveState = true }
+                                        launchSingleTop = true; restoreState = true
+                                    }
+                                },
+                                icon = { Icon(icon, contentDescription = label) },
+                                label = { Text(label) },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = YtRed, selectedTextColor = YtRed,
+                                    indicatorColor = Color.Transparent
+                                )
                             )
-                        )
+                        }
                     }
                 }
             }
@@ -155,7 +166,7 @@ class MainActivity : ComponentActivity() {
                     composable("home") {
                         HomeScreen(
                             onSearch = { nav.navigate("search") },
-                            onAccount = { nav.navigate("account") },
+                            onAccount = { nav.navigate("you") },
                             onVideo = { nav.navigate("watch/${it.id}") },
                             onChannel = { nav.openChannel(it) },
                         )
@@ -163,18 +174,31 @@ class MainActivity : ComponentActivity() {
                     composable("subs") {
                         SubscriptionsScreen(
                             onSearch = { nav.navigate("search") },
-                            onAccount = { nav.navigate("account") },
+                            onAccount = { nav.navigate("you") },
                             onVideo = { nav.navigate("watch/${it.id}") },
                             onChannel = { nav.openChannel(it) },
                         )
                     }
-                    composable("library") {
-                        LibraryScreen(
+                    composable("shorts") { ShortsScreen(onChannel = { nav.openChannel(it) }) }
+                    composable("creators") {
+                        CreatorsScreen(
                             onSearch = { nav.navigate("search") },
-                            onAccount = { nav.navigate("account") },
-                            onVideo = { nav.navigate("watch/${it.id}") },
+                            onAccount = { nav.navigate("you") },
+                            onChannel = { nav.openChannel(it) },
                         )
                     }
+                    composable("you") {
+                        YouScreen(
+                            onVideo = { nav.navigate("watch/${it.id}") },
+                            onHistory = { nav.navigate("history") },
+                            onWatchLater = { nav.navigate("watchlater") },
+                            onSubscriptions = { nav.navigate("subs") },
+                            onSettings = { nav.navigate("settings") },
+                        )
+                    }
+                    composable("history") { VideoListScreen("History", true, { nav.popBackStack() }, { nav.navigate("watch/${it.id}") }) }
+                    composable("watchlater") { VideoListScreen("Watch later", false, { nav.popBackStack() }, { nav.navigate("watch/${it.id}") }) }
+                    composable("settings") { SettingsScreen(onBack = { nav.popBackStack() }) }
                     composable("search?q={q}", arguments = listOf(navArgument("q") { type = NavType.StringType; defaultValue = "" })) {
                         SearchScreen(
                             initialQuery = Uri.decode(it.arguments?.getString("q").orEmpty()),
@@ -199,7 +223,6 @@ class MainActivity : ComponentActivity() {
                             onChannel = { u -> nav.openChannel(u) },
                         )
                     }
-                    composable("account") { AccountScreen(onBack = { nav.popBackStack() }) }
                 }
             }
         }
