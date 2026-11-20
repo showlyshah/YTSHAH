@@ -53,7 +53,7 @@ fun MiniPlayer(onOpen: (String) -> Unit) {
 }
 
 @Composable
-fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
+fun ShortsScreen(onSearch: () -> Unit, onAccount: () -> Unit, onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
     var videos by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -64,7 +64,7 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
         loading = false
     }
     Column(Modifier.fillMaxSize()) {
-        TopBar(onSearch = {}, onAccount = {})
+        TopBar(onSearch = onSearch, onAccount = onAccount)
         when {
             loading -> Loading()
             videos.isEmpty() -> Message("No Shorts available", error ?: "Try again later.")
