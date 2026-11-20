@@ -274,10 +274,8 @@ fun WatchScreen(
 
     if (fullscreen) {
         playerBox(Modifier.fillMaxSize())
-        return
-    }
-
-    Column(Modifier.fillMaxSize()) {
+    } else {
+        Column(Modifier.fillMaxSize()) {
         playerBox(Modifier.fillMaxWidth().aspectRatio(16f / 9f))
         val d = details
         when {
@@ -381,6 +379,7 @@ fun WatchScreen(
                 }
             }
         }
+    }
     }
     val dd = details
     if (sheet && dd != null) ModalBottomSheet(onDismissRequest = { sheet = false }) {
