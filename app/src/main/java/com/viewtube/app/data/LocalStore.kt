@@ -103,7 +103,7 @@ class LocalStore(context: Context) {
 
     fun toggleLater(video: VideoItem) {
         _later.value = if (isLater(video.id)) _later.value.filterNot { it.id == video.id }
-        else listOf(video) + _later.value
+        else (listOf(video) + _later.value).take(MAX_SAVED_VIDEOS)
         saveVideos("later", _later.value)
     }
 
@@ -146,7 +146,9 @@ class LocalStore(context: Context) {
 
     private fun loadVideos(key: String): List<VideoItem> = runCatching {
         val a = JSONArray(prefs.getString(key, "[]"))
-        (0 until a.length()).map { VideoItem.fromJson(a.getJSONObject(it)) }
+        (0 until a.length()).mapNotNull { index ->
+            runCatching { VideoItem.fromJson(a.getJSONObject(index)) }.getOrNull()
+        }
     }.getOrDefault(emptyList())
 
     private fun saveVideos(key: String, list: List<VideoItem>) =
@@ -154,7 +156,9 @@ class LocalStore(context: Context) {
 
     private fun loadChannels(key: String): List<ChannelItem> = runCatching {
         val a = JSONArray(prefs.getString(key, "[]"))
-        (0 until a.length()).map { ChannelItem.fromJson(a.getJSONObject(it)) }
+        (0 until a.length()).mapNotNull { index ->
+            runCatching { ChannelItem.fromJson(a.getJSONObject(index)) }.getOrNull()
+        }
     }.getOrDefault(emptyList())
 
     private fun saveChannels(key: String, list: List<ChannelItem>) =
@@ -162,11 +166,13 @@ class LocalStore(context: Context) {
 
     private fun loadStrings(key: String): List<String> = runCatching {
         val a = JSONArray(prefs.getString(key, "[]"))
-        (0 until a.length()).map { a.getString(it) }
+        (0 until a.length()).mapNotNull { index ->
+            runCatching { a.getString(index) }.getOrNull()
+        }
     }.getOrDefault(emptyList())
 
     private fun saveStrings(key: String, list: List<String>) =
         prefs.edit().putString(key, JSONArray(list).toString()).apply()
 
-    private companion object { const val MAX_SAVED_POSITIONS = 300 }
+    private companion object { const val MAX_SAVED_POSITIONS = 300; const val MAX_SAVED_VIDEOS = 300 }
 }
