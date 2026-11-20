@@ -145,7 +145,7 @@ object PlayerHolder {
     fun defaultHeight(d: VideoDetails): Int {
         val all = heights(d)
         val pref = Graph.store.preferredHeight.value
-        val target = if (pref > 0) pref else if (isMetered()) 480 else 720
+        val target = if (pref > 0) pref else if (Graph.store.dataSaver.value || isMetered()) 360 else 720
         return all.firstOrNull { it <= target } ?: all.lastOrNull() ?: 0
     }
 
