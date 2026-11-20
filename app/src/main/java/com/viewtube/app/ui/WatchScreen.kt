@@ -96,6 +96,8 @@ fun WatchScreen(
     var queueSheet by remember { mutableStateOf(false) }
     val audioSel by PlayerHolder.audioTrack.collectAsStateCompat()
     val speed by PlayerHolder.speed.collectAsStateCompat()
+    val looping by PlayerHolder.looping.collectAsStateCompat()
+    val audioOnly by PlayerHolder.audioOnly.collectAsStateCompat()
     val prefHeight by Graph.store.preferredHeight.collectAsStateCompat()
     val height by PlayerHolder.height.collectAsStateCompat()
     val notice by PlayerHolder.skipNotice.collectAsStateCompat()
@@ -231,6 +233,18 @@ fun WatchScreen(
                             )
                             Spacer(Modifier.width(8.dp))
                             AssistChip(onClick = { queueSheet = true }, label = { Text("Queue ${queue.size}") })
+                        }
+
+                        Row(Modifier.padding(top = 4.dp)) {
+                            AssistChip(
+                                onClick = { PlayerHolder.setAudioOnly(!audioOnly) },
+                                label = { Text(if (audioOnly) "Audio only: On" else "Audio only") }
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            AssistChip(
+                                onClick = { PlayerHolder.setLooping(!looping) },
+                                label = { Text(if (looping) "Loop: On" else "Loop video") }
+                            )
                         }
                     }
                 }
