@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.media.AudioManager
+import android.hardware.display.DisplayManager
+import android.view.Display
 import kotlin.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -92,6 +94,12 @@ fun WatchScreen(
     onChannel: (String) -> Unit,
 ) {
     val ctx = LocalContext.current
+    val hdrDisplaySupported = remember(ctx) {
+        runCatching {
+            val dm = ctx.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+            dm.getDisplay(Display.DEFAULT_DISPLAY)?.hdrCapabilities?.supportedHdrTypes?.isNotEmpty() == true
+        }.getOrDefault(false)
+    }
     val scope = rememberCoroutineScope()
     var details by remember { mutableStateOf<VideoDetails?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -429,10 +437,12 @@ fun WatchScreen(
                 SheetRow("$mins minutes", remainingMinutes == mins) { PlayerHolder.setSleepTimer(mins) }
             }
             if (sleepRemaining != null) SheetRow("Cancel sleep timer", false) { PlayerHolder.cancelSleepTimer() }
-            SheetTitle("HDR")
-            Text("HDR is used automatically when the selected source and this device/display support it. ViewTube will not force HDR on SDR streams.",
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp), fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (hdrDisplaySupported) {
+                SheetTitle("HDR")
+                Text("HDR display detected. HDR playback is enabled automatically when the source provides a compatible HDR stream; SDR streams remain SDR.",
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp), fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             SheetTitle("Playback speed")
             listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f).forEach { sp ->
                 SheetRow(if (sp == 1f) "Normal" else "${sp}x", speed == sp) { PlayerHolder.setSpeed(sp); sheet = false }
