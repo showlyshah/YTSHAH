@@ -30,7 +30,7 @@ real devices. Update the compile/target SDK deliberately when the Android toolch
 3. Connect an Android device with USB debugging enabled, or start an emulator.
 4. Run the `app` configuration.
 
-To build from a terminal:
+The Gradle Wrapper is committed to this repository, so no system Gradle installation is required. To build from a terminal:
 
 ```bash
 ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
@@ -44,7 +44,7 @@ app/build/outputs/apk/debug/app-debug.apk
 
 ## Continuous integration
 
-GitHub Actions runs on pushes to `main`, pull requests targeting `main`, and manual dispatch.
+GitHub Actions runs on pushes to `main` and `rebuild/**`, pull requests targeting `main`, and manual dispatch.
 The workflow runs unit tests, Android lint, and assembles both debug and release variants. On a
 successful build it uploads the debug APK as the `viewtube-debug-apk` workflow artifact and
 publishes build reports for troubleshooting.
