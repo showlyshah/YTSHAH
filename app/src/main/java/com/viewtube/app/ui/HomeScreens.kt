@@ -80,20 +80,21 @@ fun HomeScreen(
 ) {
     val scope = rememberCoroutineScope()
     val subs by Graph.store.subs.collectAsStateCompat()
+    val personalized by Graph.store.personalizedRecommendations.collectAsStateCompat()
     var videos by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(reload, subs.size) {
+    LaunchedEffect(reload, subs.size, personalized) {
         error = null
         if (videos.isEmpty()) loading = true
         runCatching {
             val trending = Graph.repo.trending()
             val fromSubs = if (subs.isEmpty()) emptyList() else Graph.repo.feed(subs.map { it.id }, 3).take(20)
             (fromSubs + trending).distinctBy { it.id }
-        }.onSuccess { videos = LocalRecommendationEngine.rank(it, Graph.store.history.value, subs) }.onFailure { if (videos.isEmpty()) error = errorText(it) }
+        }.onSuccess { videos = if (personalized) LocalRecommendationEngine.rank(it, Graph.store.history.value, subs) else it }.onFailure { if (videos.isEmpty()) error = errorText(it) }
         loading = false
         refreshing = false
     }
