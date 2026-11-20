@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.viewtube.app.data.Graph
 import com.viewtube.app.data.SubscriptionImport
+import com.viewtube.app.player.PlayerHolder
 import com.viewtube.app.data.errorText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -78,6 +79,7 @@ fun AccountScreen(onBack: () -> Unit) {
     var aiBaseUrl by remember { mutableStateOf(Graph.secure.get(com.viewtube.app.data.OpenAiCompatibleProvider.KEY_BASE_URL) ?: com.viewtube.app.data.OpenAiCompatibleProvider.DEFAULT_BASE_URL) }
     var aiModel by remember { mutableStateOf(Graph.secure.get(com.viewtube.app.data.OpenAiCompatibleProvider.KEY_MODEL) ?: com.viewtube.app.data.OpenAiCompatibleProvider.DEFAULT_MODEL) }
     var aiKey by remember { mutableStateOf("") }
+    var cacheBytes by remember { mutableStateOf(PlayerHolder.playbackCacheBytes()) }
 
     val diagnosticExport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -304,6 +306,19 @@ fun AccountScreen(onBack: () -> Unit) {
                 OutlinedButton(onClick = { diagnosticExport.launch("viewtube-diagnostics.json") }) { Text("Export report") }
                 OutlinedButton(onClick = { Graph.diagnostics.clear(); status = "Diagnostic history cleared." }) { Text("Clear logs") }
             }
+        }
+
+        Section("Storage & data") {
+            Text(
+                "Temporary stream cache: ${"%.1f".format(cacheBytes / (1024.0 * 1024.0))} MB. " +
+                    "ViewTube keeps a bounded cache to reduce repeat network usage; this is not a permanent download library.",
+                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            OutlinedButton(onClick = {
+                PlayerHolder.clearPlaybackCache()
+                cacheBytes = PlayerHolder.playbackCacheBytes()
+                status = "Temporary playback cache cleared."
+            }) { Text("Clear playback cache") }
         }
 
         Section("Backup & restore") {
