@@ -88,6 +88,17 @@ class DiagnosticJournal(private val store: android.content.SharedPreferences) {
         }
     }.getOrDefault(emptyList())
 
+    fun exportJson(): String = org.json.JSONArray().apply {
+        read().forEach { event ->
+            put(org.json.JSONObject().apply {
+                put("component", event.component)
+                put("errorType", event.errorType)
+                put("message", event.message)
+                put("timeMs", event.timeMs)
+            })
+        }
+    }.toString(2)
+
     fun clear() { store.edit().remove(KEY_EVENTS).apply() }
 
     private fun redact(raw: String): String = raw
