@@ -3,7 +3,9 @@ package com.viewtube.app
 import android.Manifest
 import android.app.PictureInPictureParams
 import android.content.Intent
+import android.graphics.Rect
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.util.Rational
 import androidx.activity.ComponentActivity
@@ -47,6 +49,7 @@ import androidx.navigation.navArgument
 import com.viewtube.app.data.videoIdFromUrl
 import com.viewtube.app.player.PlayerHolder
 import com.viewtube.app.ui.ChannelScreen
+import com.viewtube.app.ui.collectAsStateCompat
 import com.viewtube.app.ui.CreatorsScreen
 import com.viewtube.app.ui.HomeScreen
 import com.viewtube.app.ui.MiniPlayer
@@ -107,9 +110,14 @@ class MainActivity : ComponentActivity() {
     // Swiping home while a video is open shrinks it into a floating window.
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (onWatchScreen && PlayerHolder.player.isPlaying) {
+        if (onWatchScreen && PlayerHolder.player.isPlaying && Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             runCatching {
-                enterPictureInPictureMode(PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build())
+                val decor = window.decorView
+                val params = PictureInPictureParams.Builder()
+                    .setAspectRatio(Rational(16, 9))
+                    .setSourceRectHint(Rect(0, 0, decor.width.coerceAtLeast(1), decor.height.coerceAtLeast(1)))
+                    .build()
+                enterPictureInPictureMode(params)
             }
         }
     }
@@ -120,6 +128,19 @@ class MainActivity : ComponentActivity() {
         val backStack by nav.currentBackStackEntryAsState()
         val route = backStack?.destination?.route.orEmpty()
         onWatchScreen = route.startsWith("watch/")
+        val playing by PlayerHolder.playing.collectAsStateCompat()
+
+        LaunchedEffect(playing, onWatchScreen) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val decor = window.decorView
+                val params = PictureInPictureParams.Builder()
+                    .setAspectRatio(Rational(16, 9))
+                    .setAutoEnterEnabled(onWatchScreen && playing)
+                    .setSourceRectHint(Rect(0, 0, decor.width.coerceAtLeast(1), decor.height.coerceAtLeast(1)))
+                    .build()
+                setPictureInPictureParams(params)
+            }
+        }
 
         LaunchedEffect(pendingVideo) {
             pendingVideo?.let { nav.navigate("watch/$it"); pendingVideo = null }
