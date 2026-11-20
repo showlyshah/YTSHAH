@@ -243,8 +243,8 @@ fun SearchScreen(initialQuery: String, onBack: () -> Unit, onVideo: (VideoItem) 
                 val page = n()
                 results = (results + page.items).distinctBy { item ->
                     when (item) {
-                        is VideoItem -> "v:\${item.id}"
-                        is ChannelItem -> "c:\${item.id}"
+                        is VideoItem -> "v:" + item.id
+                        is ChannelItem -> "c:" + item.id
                     }
                 }
                 next = page.next
