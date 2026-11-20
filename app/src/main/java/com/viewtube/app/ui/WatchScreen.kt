@@ -77,7 +77,8 @@ private fun Context.activity(): Activity? {
     return null
 }
 
-@OptIn(UnstableApi::class, ExperimentalMaterial3Api::class)
+@androidx.annotation.OptIn(UnstableApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WatchScreen(
     videoId: String,
