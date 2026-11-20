@@ -182,12 +182,14 @@ fun SearchScreen(initialQuery: String, onBack: () -> Unit, onVideo: (VideoItem) 
     var next by remember { mutableStateOf<(suspend () -> Paged<Item>)?>(null) }
     var loading by remember { mutableStateOf(false) }
     var loadingMore by remember { mutableStateOf(false) }
+    var pageError by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     val list = rememberLazyListState()
 
     fun run(q: String) {
         if (q.isBlank()) return
         submitted = q; query = q; suggestions = emptyList()
+        results = emptyList(); next = null; pageError = null
         scope.launch {
             loading = true; error = null
             runCatching { Graph.repo.search(q) }
@@ -204,11 +206,12 @@ fun SearchScreen(initialQuery: String, onBack: () -> Unit, onVideo: (VideoItem) 
         suggestions = Graph.repo.suggestions(query).take(8)
     }
 
-    LoadMoreEffect(list, next != null && !loadingMore) {
+    LoadMoreEffect(list, next != null && !loadingMore && pageError == null) {
         val n = next ?: return@LoadMoreEffect
         loadingMore = true
         scope.launch {
-            runCatching { n() }.onSuccess { results = (results + it.items).distinctBy { item -> when (item) { is VideoItem -> "v:${item.id}"; is ChannelItem -> "c:${item.id}" } }; next = it.next }
+            runCatching { n() }.onSuccess { results = (results + it.items).distinctBy { item -> when (item) { is VideoItem -> "v:${item.id}"; is ChannelItem -> "c:${item.id}" } }; next = it.next; pageError = null }
+                .onFailure { pageError = errorText(it) }
             loadingMore = false
         }
     }
@@ -235,6 +238,14 @@ fun SearchScreen(initialQuery: String, onBack: () -> Unit, onVideo: (VideoItem) 
                     }
                 }
                 if (loadingMore) item { Loading(Modifier.fillMaxWidth().height(64.dp)) }
+                pageError?.let { message ->
+                    item {
+                        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(message, Modifier.weight(1f), color = MaterialTheme.colorScheme.error)
+                            TextButton(onClick = { pageError = null }) { Text("Retry") }
+                        }
+                    }
+                }
             }
         }
     }
