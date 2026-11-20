@@ -179,7 +179,7 @@ class MainActivity : ComponentActivity() {
                             onChannel = { nav.openChannel(it) },
                         )
                     }
-                    composable("shorts") { ShortsScreen(onChannel = { nav.openChannel(it) }) }
+                    composable("shorts") { ShortsScreen(onChannel = { nav.openChannel(it) }, onVideo = { nav.navigate("watch/${it.id}") }) }
                     composable("creators") {
                         CreatorsScreen(
                             onSearch = { nav.navigate("search") },
