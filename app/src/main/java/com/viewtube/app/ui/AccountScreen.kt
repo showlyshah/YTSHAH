@@ -159,8 +159,10 @@ fun AccountScreen(onBack: () -> Unit) {
 
         Section("Privacy") {
             Text(
-                "History, subscriptions and settings are saved only on this phone. Nothing is sent anywhere " +
-                    "unless you sign in to a sync server above. The sync sign-in token is stored encrypted.",
+                "Your watch history, saved videos and profile stay on this phone. Search and playback requests " +
+                    "are sent to the video service. If enabled, SponsorBlock receives only a short prefix of a " +
+                    "hashed video ID. Subscriptions are synced only when you sign in to your chosen Piped server; " +
+                    "the sync token is stored encrypted.",
                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             OutlinedButton(onClick = { confirmWipe = true }) { Text("Delete all my data from this phone") }
