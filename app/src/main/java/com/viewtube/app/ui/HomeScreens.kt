@@ -208,7 +208,7 @@ fun SearchScreen(initialQuery: String, onBack: () -> Unit, onVideo: (VideoItem) 
         val n = next ?: return@LoadMoreEffect
         loadingMore = true
         scope.launch {
-            runCatching { n() }.onSuccess { results = results + it.items; next = it.next }.onFailure { next = null }
+            runCatching { n() }.onSuccess { results = (results + it.items).distinctBy { item -> when (item) { is VideoItem -> "v:${item.id}"; is ChannelItem -> "c:${item.id}" } }; next = it.next }
             loadingMore = false
         }
     }
@@ -247,7 +247,7 @@ fun SubscriptionsScreen(onSearch: () -> Unit, onAccount: () -> Unit, onVideo: (V
     var loading by remember { mutableStateOf(true) }
     var reload by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(subs.size, reload) {
+    LaunchedEffect(subs.map { it.id }, reload) {
         loading = subs.isNotEmpty()
         videos = if (subs.isEmpty()) emptyList() else Graph.repo.feed(subs.map { it.id })
         loading = false
