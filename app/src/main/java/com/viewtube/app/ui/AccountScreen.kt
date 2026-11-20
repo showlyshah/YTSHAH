@@ -68,6 +68,33 @@ fun AccountScreen(onBack: () -> Unit) {
     var status by remember { mutableStateOf<String?>(null) }
     var confirmWipe by remember { mutableStateOf(false) }
 
+    val backupExport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            status = runCatching {
+                withContext(Dispatchers.IO) {
+                    ctx.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(store.exportBackup()) }
+                        ?: error("Couldn't open the selected destination.")
+                }
+                "ViewTube backup exported."
+            }.getOrElse { "Backup export failed: ${it.message ?: "unknown error"}" }
+        }
+    }
+    val backupImport = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            status = runCatching {
+                val raw = withContext(Dispatchers.IO) {
+                    ctx.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                        ?: error("Couldn't read the selected file.")
+                }
+                require(raw.length <= 5_000_000) { "Backup file is too large." }
+                val restored = store.importBackup(raw)
+                "Backup restored. Imported ${restored} saved items and subscriptions."
+            }.getOrElse { "Backup restore failed: ${it.message ?: "invalid backup"}" }
+        }
+    }
+
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
@@ -160,6 +187,18 @@ fun AccountScreen(onBack: () -> Unit) {
         Section("Playback") {
             ToggleRow("Skip sponsor & promo segments", "Uses the community SponsorBlock list", sponsor) { store.setSponsorSkip(it) }
             ToggleRow("Autoplay next video", null, autoplay) { store.setAutoplayNext(it) }
+        }
+
+        Section("Backup & restore") {
+            Text(
+                "Export or restore your subscriptions, history, Watch later, queue, settings and playback positions. " +
+                    "Piped sign-in credentials are never included.",
+                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { backupExport.launch("viewtube-backup.json") }) { Text("Export backup") }
+                OutlinedButton(onClick = { backupImport.launch(arrayOf("application/json", "text/*")) }) { Text("Restore backup") }
+            }
         }
 
         Section("Privacy") {
