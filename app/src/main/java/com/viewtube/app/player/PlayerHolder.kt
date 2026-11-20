@@ -156,7 +156,7 @@ object PlayerHolder {
         val playable = list.filter { it.deliveryMethod != DeliveryMethod.TORRENT }
         val chosen = if (trackId != null) playable.filter { it.audioTrackId == trackId } else emptyList()
         val original = chosen.ifEmpty {
-            playable.filter { it.audioTrackType == null || it.audioTrackType.name == "ORIGINAL" }.ifEmpty { playable }
+            playable.filter { it.audioTrackType == null || it.audioTrackType?.name == "ORIGINAL" }.ifEmpty { playable }
         }
         return original.filter { it.format == MediaFormat.M4A }.maxByOrNull { it.averageBitrate }
             ?: original.maxByOrNull { it.averageBitrate }
