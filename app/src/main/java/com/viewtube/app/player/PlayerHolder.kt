@@ -25,10 +25,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.asSharedFlow
 import org.schabi.newpipe.extractor.MediaFormat
 import org.schabi.newpipe.extractor.stream.AudioStream
 import org.schabi.newpipe.extractor.stream.DeliveryMethod
@@ -53,6 +56,20 @@ object PlayerHolder {
     private val _height = MutableStateFlow(0)
     val height: StateFlow<Int> = _height.asStateFlow()
 
+    private val _playing = MutableStateFlow(false)
+    /** True while the player is set to play (shows pause icon in the mini player). */
+    val playing: StateFlow<Boolean> = _playing.asStateFlow()
+
+    private val _audioTrack = MutableStateFlow<String?>(null)
+    val audioTrack: StateFlow<String?> = _audioTrack.asStateFlow()
+
+    private val _speed = MutableStateFlow(1f)
+    val speed: StateFlow<Float> = _speed.asStateFlow()
+
+    /** Fired with the video id when autoplay moved on to the next video by itself. */
+    private val _advanced = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val advanced: SharedFlow<String> = _advanced.asSharedFlow()
+
     private val _skipNotice = MutableStateFlow<String?>(null)
     val skipNotice: StateFlow<String?> = _skipNotice.asStateFlow()
 
@@ -67,7 +84,7 @@ object PlayerHolder {
     private fun buildPlayer(): ExoPlayer {
         val http = OkHttpDataSource.Factory(Graph.http)
         val factory = DefaultDataSource.Factory(appContext) { YtDataSource(http.createDataSource()) }
-        return ExoPlayer.Builder(appContext)
+        val p = ExoPlayer.Builder(appContext)
             .setMediaSourceFactory(DefaultMediaSourceFactory(factory))
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -79,6 +96,29 @@ object PlayerHolder {
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
+        p.addListener(object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) { _playing.value = p.playWhenReady && p.playbackState != Player.STATE_ENDED }
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) { _playing.value = playWhenReady && p.playbackState != Player.STATE_ENDED }
+            override fun onPlaybackStateChanged(state: Int) {
+                _playing.value = p.playWhenReady && state != Player.STATE_ENDED
+                if (state == Player.STATE_ENDED) onEnded()
+            }
+        })
+        return p
+    }
+
+    private fun onEnded() {
+        val d = _current.value ?: return
+        if (looping || d.isLive || !Graph.store.autoplayNext.value) return
+        val next = d.related.firstOrNull { !Graph.store.isWatched(it.id) } ?: d.related.firstOrNull() ?: return
+        scope.launch {
+            runCatching {
+                val nd = Graph.repo.details(next.id)
+                Graph.store.addHistory(nd.video)
+                play(nd)
+                _advanced.emit(next.id)
+            }
+        }
     }
 
     private fun sourceFactory(): DefaultDataSource.Factory {
@@ -93,22 +133,39 @@ object PlayerHolder {
         (d.videoOnly.map { it.height } + d.muxed.map { it.height })
             .filter { it > 0 }.distinct().sortedDescending()
 
-    /** 720p by default: sharp, but light on data. The user can pick higher. */
+    /** The user's preferred height, else 480p on mobile data and 720p on Wi-Fi. */
     fun defaultHeight(d: VideoDetails): Int {
         val all = heights(d)
-        return all.firstOrNull { it <= 720 } ?: all.lastOrNull() ?: 0
+        val pref = Graph.store.preferredHeight.value
+        val target = if (pref > 0) pref else if (isMetered()) 480 else 720
+        return all.firstOrNull { it <= target } ?: all.lastOrNull() ?: 0
     }
 
-    private fun bestAudio(list: List<AudioStream>): AudioStream? {
+    private fun isMetered(): Boolean = runCatching {
+        (appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager).isActiveNetworkMetered
+    }.getOrDefault(false)
+
+    /** Audio languages / tracks on offer for this video: id to label. Empty when there is only one. */
+    fun audioOptions(d: VideoDetails): List<Pair<String, String>> =
+        d.audio.filter { it.audioTrackId != null }
+            .distinctBy { it.audioTrackId }
+            .map { (it.audioTrackId ?: "") to (it.audioTrackName ?: it.audioLocale?.displayName ?: it.audioTrackId ?: "Track") }
+            .let { if (it.size > 1) it else emptyList() }
+
+    private fun bestAudio(list: List<AudioStream>, trackId: String?): AudioStream? {
         val playable = list.filter { it.deliveryMethod != DeliveryMethod.TORRENT }
-        val original = playable.filter { it.audioTrackType == null || it.audioTrackType.name == "ORIGINAL" }
-            .ifEmpty { playable }
+        val chosen = if (trackId != null) playable.filter { it.audioTrackId == trackId } else emptyList()
+        val original = chosen.ifEmpty {
+            playable.filter { it.audioTrackType == null || it.audioTrackType.name == "ORIGINAL" }.ifEmpty { playable }
+        }
         return original.filter { it.format == MediaFormat.M4A }.maxByOrNull { it.averageBitrate }
             ?: original.maxByOrNull { it.averageBitrate }
     }
 
     private fun bestVideo(list: List<VideoStream>, height: Int): VideoStream? {
-        val at = list.filter { it.height == height && it.deliveryMethod != DeliveryMethod.TORRENT }
+        val ok = list.filter { it.deliveryMethod != DeliveryMethod.TORRENT }
+        val h = ok.map { it.height }.filter { it <= height }.maxOrNull() ?: return null
+        val at = ok.filter { it.height == h }
         return at.firstOrNull { it.format == MediaFormat.MPEG_4 } ?: at.firstOrNull()
     }
 
@@ -125,7 +182,18 @@ object PlayerHolder {
 
     // -------------------------------------------------------------------- play
 
-    fun play(d: VideoDetails, wantedHeight: Int = defaultHeight(d), startMs: Long = 0) {
+    private var looping = false
+
+    fun play(
+        d: VideoDetails,
+        wantedHeight: Int = defaultHeight(d),
+        startMs: Long = 0,
+        audioTrackId: String? = _audioTrack.value,
+        loop: Boolean = false,
+    ) {
+        looping = loop
+        player.repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+        _audioTrack.value = audioTrackId
         val same = _current.value?.video?.id == d.video.id
         val resumeAt = if (same && startMs == 0L) player.currentPosition else startMs
 
@@ -142,7 +210,7 @@ object PlayerHolder {
                 .createMediaSource(item.buildUpon().setUri(d.hlsUrl).build())
             _height.value = 0
         } else {
-            val audio = bestAudio(d.audio)
+            val audio = bestAudio(d.audio, audioTrackId)
             val videoOnly = bestVideo(d.videoOnly, wantedHeight)
             val muxed = bestVideo(d.muxed, wantedHeight)
             val chosen: MediaSource? = when {
@@ -164,6 +232,7 @@ object PlayerHolder {
         player.setMediaSource(source)
         player.prepare()
         if (resumeAt > 0) player.seekTo(resumeAt)
+        player.setPlaybackSpeed(_speed.value)
         player.playWhenReady = true
 
         if (!same) loadSegments(d.video.id)
@@ -177,8 +246,16 @@ object PlayerHolder {
         player.stop()
         player.clearMediaItems()
         _current.value = null
+        _playing.value = false
         segments = emptyList()
+        runCatching { appContext.stopService(Intent(appContext, PlaybackService::class.java)) }
     }
+
+    fun toggle() { if (player.playWhenReady) player.pause() else player.play() }
+
+    fun setSpeed(s: Float) { _speed.value = s; player.setPlaybackSpeed(s) }
+
+    fun setLooping(on: Boolean) { looping = on; player.repeatMode = if (on) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF }
 
     // ---------------------------------------------------------- sponsor skipping
 
