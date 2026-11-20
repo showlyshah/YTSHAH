@@ -174,14 +174,15 @@ fun WatchScreen(
         var translator: OnDeviceSubtitleTranslator? = null
         try {
             val cues = Graph.repo.subtitleCues(track)
-            translator = OnDeviceSubtitleTranslator.create(track.languageTag, translationTarget)
+            val activeTranslator = OnDeviceSubtitleTranslator.create(track.languageTag, translationTarget)
+            translator = activeTranslator
             var previousText: String? = null
             while (true) {
                 val position = PlayerHolder.player.currentPosition
                 val sourceText = cues.firstOrNull { position >= it.startMs && position < it.endMs }?.text
                 if (sourceText != previousText) {
                     previousText = sourceText
-                    translatedCaption = if (sourceText.isNullOrBlank()) null else translator.translate(sourceText)
+                    translatedCaption = if (sourceText.isNullOrBlank()) null else activeTranslator.translate(sourceText)
                 }
                 kotlinx.coroutines.delay(180)
             }
