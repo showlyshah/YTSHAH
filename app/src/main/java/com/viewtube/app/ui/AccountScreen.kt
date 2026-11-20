@@ -60,6 +60,9 @@ fun AccountScreen(onBack: () -> Unit) {
     val personalized by store.personalizedRecommendations.collectAsStateCompat()
     val cloudAiEnabled by store.cloudAiEnabled.collectAsStateCompat()
     val subs by store.subs.collectAsStateCompat()
+    val history by store.history.collectAsStateCompat()
+    val later by store.later.collectAsStateCompat()
+    val queue by store.queue.collectAsStateCompat()
 
     var nameField by remember(name) { mutableStateOf(name) }
     var serverField by remember(server) { mutableStateOf(server) }
@@ -72,6 +75,18 @@ fun AccountScreen(onBack: () -> Unit) {
     var aiModel by remember { mutableStateOf(Graph.secure.get(com.viewtube.app.data.OpenAiCompatibleProvider.KEY_MODEL) ?: com.viewtube.app.data.OpenAiCompatibleProvider.DEFAULT_MODEL) }
     var aiKey by remember { mutableStateOf("") }
 
+    val diagnosticExport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            status = runCatching {
+                withContext(Dispatchers.IO) {
+                    ctx.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(Graph.diagnostics.exportJson()) }
+                        ?: error("Couldn't open the selected destination.")
+                }
+                "Redacted diagnostic report exported."
+            }.getOrElse { "Diagnostic export failed: ${it.message ?: "unknown error"}" }
+        }
+    }
     val backupExport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
@@ -237,6 +252,30 @@ fun AccountScreen(onBack: () -> Unit) {
                 "Cloud requests still require explicit approval for each AI action.",
                 cloudAiEnabled
             ) { store.setCloudAiEnabled(it) }
+        }
+
+        Section("Your viewing insights") {
+            val topics = com.viewtube.app.data.LocalRecommendationEngine.topicsFrom(history, 6)
+            Text("${history.size} videos in local watch history · ${later.size} saved · ${queue.size} queued")
+            Text(
+                "Top topics from video titles: " + (topics.joinToString(", ").ifBlank { "Not enough history yet" }),
+                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                "These statistics are calculated on this device. They are not uploaded.",
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        Section("Diagnostics") {
+            Text(
+                "${Graph.diagnostics.read().size} recent redacted diagnostic events stored locally.",
+                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { diagnosticExport.launch("viewtube-diagnostics.json") }) { Text("Export report") }
+                OutlinedButton(onClick = { Graph.diagnostics.clear(); status = "Diagnostic history cleared." }) { Text("Clear logs") }
+            }
         }
 
         Section("Backup & restore") {
