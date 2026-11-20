@@ -36,6 +36,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -111,7 +112,7 @@ fun WatchScreen(
         comments = null; commentList = emptyList(); showDesc = false
         // Re-opening the video that is already playing (from the mini player): keep it going.
         val cur = PlayerHolder.current.value
-        if (cur != null && cur.video.id == videoId) { details = cur; return@LaunchedEffect }
+        if (cur != null && cur.video.id == videoId && attempt == 0) { details = cur; return@LaunchedEffect }
         details = null
         runCatching { Graph.repo.details(videoId) }
             .onSuccess { d ->
@@ -206,7 +207,12 @@ fun WatchScreen(
             else -> LazyColumn(Modifier.fillMaxSize()) {
                 item {
                     Column(Modifier.padding(12.dp)) {
-                        if (error != null) Text(error!!, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(bottom = 8.dp))
+                        if (error != null) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                                Text(error!!, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+                                TextButton(onClick = { attempt++ }) { Text("Retry") }
+                            }
+                        }
                         Text(d.video.title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = if (showDesc) 6 else 2, overflow = TextOverflow.Ellipsis)
                         Text(
                             listOfNotNull(
