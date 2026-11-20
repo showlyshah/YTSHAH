@@ -1,6 +1,7 @@
 package com.viewtube.app.data
 
 import android.content.Context
+import androidx.media3.common.util.UnstableApi
 import okhttp3.OkHttpClient
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.localization.ContentCountry
@@ -9,6 +10,7 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /** Simple app-wide holder for the long-lived objects. */
+@androidx.annotation.OptIn(UnstableApi::class)
 object Graph {
     lateinit var appContext: Context; private set
     lateinit var http: OkHttpClient; private set
