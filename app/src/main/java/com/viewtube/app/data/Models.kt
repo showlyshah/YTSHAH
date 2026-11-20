@@ -61,6 +61,8 @@ data class ChannelItem(
 ) : Item {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id); put("url", url); put("name", name); put("avatar", avatar ?: "")
+        put("banner", banner ?: ""); put("subscribers", subscribers)
+        put("description", description ?: "")
     }
 
     companion object {
@@ -69,6 +71,9 @@ data class ChannelItem(
             url = o.optString("url").ifBlank { channelUrl(o.getString("id")) },
             name = o.optString("name"),
             avatar = o.optString("avatar").ifBlank { null },
+            banner = o.optString("banner").ifBlank { null },
+            subscribers = o.optLong("subscribers", -1),
+            description = o.optString("description").ifBlank { null },
         )
     }
 }
