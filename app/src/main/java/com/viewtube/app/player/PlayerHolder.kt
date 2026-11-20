@@ -235,10 +235,10 @@ object PlayerHolder {
         audioTrackId: String? = _audioTrack.value,
         loop: Boolean = false,
     ) {
-        loopRepeatEnabled = loop
-        _looping.value = loop
-        _repeatMode.value = if (loop) "one" else "continuous"
-        player.repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+        if (loop) _repeatMode.value = "one"
+        loopRepeatEnabled = _repeatMode.value == "one"
+        _looping.value = loopRepeatEnabled
+        player.repeatMode = if (loopRepeatEnabled) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
         _audioTrack.value = audioTrackId
         val same = _current.value?.video?.id == d.video.id
         val resumeAt = if (same && startMs == 0L) player.currentPosition else startMs
