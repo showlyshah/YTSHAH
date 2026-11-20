@@ -60,7 +60,7 @@ fun ChannelScreen(url: String, onBack: () -> Unit, onVideo: (VideoItem) -> Unit,
         val n = next ?: return@LoadMoreEffect
         loadingMore = true
         scope.launch {
-            runCatching { n() }.onSuccess { videos = videos + it.items; next = it.next }.onFailure { next = null }
+            runCatching { n() }.onSuccess { videos = (videos + it.items).distinctBy { video -> video.id }; next = it.next }
             loadingMore = false
         }
     }
