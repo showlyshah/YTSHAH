@@ -60,7 +60,7 @@ class FeedMixer(
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (error: Throwable) {
+            } catch (error: Exception) {
                 // Keep this cursor exactly where it was so a later call can retry it.
                 lastError = error
             }
