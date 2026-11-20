@@ -24,7 +24,7 @@ class LocalStore(context: Context) {
     private val _autoplay = MutableStateFlow(prefs.getBoolean("autoplay_next", true))
     private val _pipedServer = MutableStateFlow(prefs.getString("piped_server", "https://pipedapi.adminforge.de").orEmpty())
     private val _pipedUser = MutableStateFlow(prefs.getString("piped_user", "")?.ifBlank { null })
-    private val positions = JSONObject(prefs.getString("positions", "{}") ?: "{}")
+    private val positions = runCatching { JSONObject(prefs.getString("positions", "{}") ?: "{}") }.getOrElse { JSONObject() }
 
     val subs: StateFlow<List<ChannelItem>> = _subs.asStateFlow()
     val history: StateFlow<List<VideoItem>> = _history.asStateFlow()
@@ -83,7 +83,14 @@ class LocalStore(context: Context) {
     }
 
     fun savePosition(videoId: String, ms: Long) {
-        if (ms < 5_000) positions.remove(videoId) else positions.put(videoId, ms)
+        if (ms < 5_000) {
+            positions.remove(videoId)
+        } else {
+            positions.put(videoId, ms)
+            // Keep resume metadata bounded even if the user watches thousands of videos.
+            val keys = positions.keys().asSequence().toList()
+            keys.take((keys.size - MAX_SAVED_POSITIONS).coerceAtLeast(0)).forEach(positions::remove)
+        }
         prefs.edit().putString("positions", positions.toString()).apply()
     }
 
@@ -159,4 +166,6 @@ class LocalStore(context: Context) {
 
     private fun saveStrings(key: String, list: List<String>) =
         prefs.edit().putString(key, JSONArray(list).toString()).apply()
+
+    private companion object { const val MAX_SAVED_POSITIONS = 300 }
 }
