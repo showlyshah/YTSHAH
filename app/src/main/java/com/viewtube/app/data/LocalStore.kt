@@ -26,6 +26,7 @@ class LocalStore(context: Context) {
     private val _personalizedRecommendations = MutableStateFlow(prefs.getBoolean("personalized_recommendations", false))
     private val _cloudAiEnabled = MutableStateFlow(prefs.getBoolean("cloud_ai_enabled", false))
     private val _themeMode = MutableStateFlow(prefs.getString("theme_mode", "system").orEmpty())
+    private val _dataSaver = MutableStateFlow(prefs.getBoolean("data_saver", false))
     private val _pipedServer = MutableStateFlow(prefs.getString("piped_server", "https://pipedapi.adminforge.de").orEmpty())
     private val _pipedUser = MutableStateFlow(prefs.getString("piped_user", "")?.ifBlank { null })
     private val positions = JSONObject(prefs.getString("positions", "{}") ?: "{}")
@@ -43,6 +44,7 @@ class LocalStore(context: Context) {
     val personalizedRecommendations: StateFlow<Boolean> = _personalizedRecommendations.asStateFlow()
     val cloudAiEnabled: StateFlow<Boolean> = _cloudAiEnabled.asStateFlow()
     val themeMode: StateFlow<String> = _themeMode.asStateFlow()
+    val dataSaver: StateFlow<Boolean> = _dataSaver.asStateFlow()
     val pipedServer: StateFlow<String> = _pipedServer.asStateFlow()
     val pipedUser: StateFlow<String?> = _pipedUser.asStateFlow()
 
@@ -141,6 +143,7 @@ class LocalStore(context: Context) {
     fun setPersonalizedRecommendations(on: Boolean) { _personalizedRecommendations.value = on; prefs.edit().putBoolean("personalized_recommendations", on).apply() }
     fun setCloudAiEnabled(on: Boolean) { _cloudAiEnabled.value = on; prefs.edit().putBoolean("cloud_ai_enabled", on).apply() }
     fun setThemeMode(mode: String) { _themeMode.value = mode.lowercase().takeIf { it in setOf("system", "light", "dark") } ?: "system"; prefs.edit().putString("theme_mode", _themeMode.value).apply() }
+    fun setDataSaver(on: Boolean) { _dataSaver.value = on; prefs.edit().putBoolean("data_saver", on).apply() }
     fun setPipedServer(server: String) { _pipedServer.value = server.trim().trimEnd('/'); prefs.edit().putString("piped_server", _pipedServer.value).apply() }
     fun setPipedUser(user: String?) { _pipedUser.value = user?.trim()?.takeIf { it.isNotEmpty() }; prefs.edit().putString("piped_user", _pipedUser.value.orEmpty()).apply() }
 
@@ -161,6 +164,7 @@ class LocalStore(context: Context) {
         put("personalizedRecommendations", _personalizedRecommendations.value)
         put("cloudAiEnabled", _cloudAiEnabled.value)
         put("themeMode", _themeMode.value)
+        put("dataSaver", _dataSaver.value)
     }.toString(2)
 
     /** Restores only recognised data fields; never imports credentials or server tokens. */
@@ -196,6 +200,7 @@ class LocalStore(context: Context) {
         _personalizedRecommendations.value = root.optBoolean("personalizedRecommendations", false)
         _cloudAiEnabled.value = root.optBoolean("cloudAiEnabled", false)
         _themeMode.value = root.optString("themeMode", "system").lowercase().takeIf { it in setOf("system", "light", "dark") } ?: "system"
+        _dataSaver.value = root.optBoolean("dataSaver", false)
         prefs.edit()
             .putInt("pref_height", _prefHeight.value)
             .putBoolean("sponsor_skip", _sponsorSkip.value)
@@ -203,6 +208,7 @@ class LocalStore(context: Context) {
             .putBoolean("personalized_recommendations", _personalizedRecommendations.value)
             .putBoolean("cloud_ai_enabled", _cloudAiEnabled.value)
             .putString("theme_mode", _themeMode.value)
+            .putBoolean("data_saver", _dataSaver.value)
             .apply()
         positions.keys().asSequence().toList().forEach { positions.remove(it) }
         val importedPositions = root.optJSONObject("positions")
@@ -237,7 +243,7 @@ class LocalStore(context: Context) {
         prefs.edit().clear().apply()
         _subs.value = emptyList(); _history.value = emptyList(); _later.value = emptyList(); _queue.value = emptyList()
         _profile.value = ""; _searches.value = emptyList(); _prefHeight.value = 0
-        _sponsorSkip.value = true; _autoplay.value = true; _personalizedRecommendations.value = false; _cloudAiEnabled.value = false; _themeMode.value = "system"
+        _sponsorSkip.value = true; _autoplay.value = true; _personalizedRecommendations.value = false; _cloudAiEnabled.value = false; _themeMode.value = "system"; _dataSaver.value = false
         _pipedServer.value = "https://pipedapi.adminforge.de"; _pipedUser.value = null
         positions.keys().asSequence().toList().forEach { positions.remove(it) }
     }
