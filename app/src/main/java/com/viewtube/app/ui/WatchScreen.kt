@@ -93,6 +93,7 @@ fun WatchScreen(
     var loadingComments by remember { mutableStateOf(false) }
     var showDesc by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf(false) }
+    var queueSheet by remember { mutableStateOf(false) }
     val audioSel by PlayerHolder.audioTrack.collectAsStateCompat()
     val speed by PlayerHolder.speed.collectAsStateCompat()
     val prefHeight by Graph.store.preferredHeight.collectAsStateCompat()
@@ -100,6 +101,7 @@ fun WatchScreen(
     val notice by PlayerHolder.skipNotice.collectAsStateCompat()
     val subs by Graph.store.subs.collectAsStateCompat()
     val later by Graph.store.later.collectAsStateCompat()
+    val queue by Graph.store.queue.collectAsStateCompat()
 
     LaunchedEffect(videoId, attempt) {
         error = null
@@ -225,8 +227,10 @@ fun WatchScreen(
                             Spacer(Modifier.width(8.dp))
                             if (!d.isLive) AssistChip(
                                 onClick = { sheet = true },
-                                label = { Text(if (height > 0) "${height}p" else "Quality") }
+                                label = { Text(if (height > 0) "${height}p" else "Quality · Speed") }
                             )
+                            Spacer(Modifier.width(8.dp))
+                            AssistChip(onClick = { queueSheet = true }, label = { Text("Queue ${queue.size}") })
                         }
                     }
                 }
@@ -255,7 +259,15 @@ fun WatchScreen(
                 }
 
                 item { Text("Up next", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(12.dp)) }
-                items(d.related, key = { it.id }) { v -> VideoRow(v) { onVideo(v.id) } }
+                items(d.related, key = { it.id }) { v ->
+                    Column(Modifier.fillMaxWidth()) {
+                        VideoRow(v) { onVideo(v.id) }
+                        OutlinedButton(
+                            onClick = { Graph.store.enqueue(v) },
+                            modifier = Modifier.padding(start = 12.dp, bottom = 10.dp)
+                        ) { Text(if (queue.any { it.id == v.id }) "Move to end of queue" else "Add to queue") }
+                    }
+                }
             }
         }
     }
@@ -293,6 +305,37 @@ fun WatchScreen(
             }
         }
     }
+    if (queueSheet) ModalBottomSheet(onDismissRequest = { queueSheet = false }) {
+        Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Play-next queue (${queue.size})", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                if (queue.isNotEmpty()) Text(
+                    "Clear",
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.clickable { Graph.store.clearQueue() }.padding(8.dp)
+                )
+            }
+            if (queue.isEmpty()) {
+                Text("Your queue is empty. Add videos from the Up next list.", modifier = Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                LazyColumn(Modifier.height(420.dp)) {
+                    items(queue, key = { it.id }) { item ->
+                        Column {
+                            VideoRow(item) { queueSheet = false; onVideo(item.id) }
+                            OutlinedButton(
+                                onClick = { Graph.store.removeFromQueue(item.id) },
+                                modifier = Modifier.padding(start = 12.dp, bottom = 8.dp)
+                            ) { Text("Remove from queue") }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
 }
 
 @Composable
