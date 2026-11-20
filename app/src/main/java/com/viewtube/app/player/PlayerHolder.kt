@@ -113,7 +113,7 @@ object PlayerHolder {
 
     private fun onEnded() {
         val d = _current.value ?: return
-        if (looping || d.isLive || !Graph.store.autoplayNext.value) return
+        if (loopRepeatEnabled || d.isLive || !Graph.store.autoplayNext.value) return
         // A user-curated queue always takes precedence over automatic related videos.
         val next = Graph.store.dequeueNext()
             ?: d.related.firstOrNull { !Graph.store.isWatched(it.id) }
@@ -190,7 +190,7 @@ object PlayerHolder {
 
     // -------------------------------------------------------------------- play
 
-    private var looping = false
+    private var loopRepeatEnabled = false
 
     fun play(
         d: VideoDetails,
@@ -274,7 +274,7 @@ object PlayerHolder {
     }
 
     fun setLooping(on: Boolean) {
-        looping = on
+        loopRepeatEnabled = on
         _looping.value = on
         player.repeatMode = if (on) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
     }
