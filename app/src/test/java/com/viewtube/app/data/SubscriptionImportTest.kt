@@ -23,5 +23,7 @@ class SubscriptionImportTest {
         assertEquals("abcdefghijk", videoIdFromUrl("https://youtu.be/abcdefghijk"))
         assertEquals("abcdefghijk", videoIdFromUrl("https://www.youtube.com/shorts/abcdefghijk"))
         assertNull(videoIdFromUrl("https://example.com/not-a-video"))
+        assertNull(videoIdFromUrl("https://notyoutube.com/watch?v=abcdefghijk"))
+        assertNull(videoIdFromUrl("https://youtube.com.evil.example/watch?v=abcdefghijk"))
     }
 }
