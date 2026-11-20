@@ -50,12 +50,22 @@ object SubscriptionImport {
         val out = mutableListOf<String>()
         val cell = StringBuilder()
         var quoted = false
-        for (c in line) {
+        var index = 0
+        while (index < line.length) {
+            val char = line[index]
             when {
-                c == '"' -> quoted = !quoted
-                c == ',' && !quoted -> { out += cell.toString(); cell.clear() }
-                else -> cell.append(c)
+                char == '"' && quoted && index + 1 < line.length && line[index + 1] == '"' -> {
+                    cell.append('"')
+                    index++
+                }
+                char == '"' -> quoted = !quoted
+                char == ',' && !quoted -> {
+                    out += cell.toString()
+                    cell.clear()
+                }
+                else -> cell.append(char)
             }
+            index++
         }
         out += cell.toString()
         return out
