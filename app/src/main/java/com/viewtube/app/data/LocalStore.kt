@@ -138,6 +138,72 @@ class LocalStore(context: Context) {
     fun setPipedServer(server: String) { _pipedServer.value = server.trim().trimEnd('/'); prefs.edit().putString("piped_server", _pipedServer.value).apply() }
     fun setPipedUser(user: String?) { _pipedUser.value = user?.trim()?.takeIf { it.isNotEmpty() }; prefs.edit().putString("piped_user", _pipedUser.value.orEmpty()).apply() }
 
+    /** Portable, versioned backup. Authentication tokens are intentionally excluded. */
+    fun exportBackup(): String = JSONObject().apply {
+        put("version", 1)
+        put("createdAt", System.currentTimeMillis())
+        put("profileName", _profile.value)
+        put("subscriptions", JSONArray(_subs.value.map { it.toJson() }))
+        put("history", JSONArray(_history.value.map { it.toJson() }))
+        put("watchLater", JSONArray(_later.value.map { it.toJson() }))
+        put("queue", JSONArray(_queue.value.map { it.toJson() }))
+        put("searchHistory", JSONArray(_searches.value))
+        put("positions", positions)
+        put("preferredHeight", _prefHeight.value)
+        put("sponsorSkip", _sponsorSkip.value)
+        put("autoplayNext", _autoplay.value)
+        put("personalizedRecommendations", _personalizedRecommendations.value)
+    }.toString(2)
+
+    /** Restores only recognised data fields; never imports credentials or server tokens. */
+    fun importBackup(raw: String): Int {
+        val root = JSONObject(raw)
+        require(root.optInt("version", -1) == 1) { "Unsupported backup version." }
+        fun videos(key: String): List<VideoItem> {
+            val a = root.optJSONArray(key) ?: return emptyList()
+            return (0 until a.length()).mapNotNull { i ->
+                runCatching { VideoItem.fromJson(a.getJSONObject(i)) }.getOrNull()
+            }.distinctBy { it.id }.take(500)
+        }
+        val channelsArray = root.optJSONArray("subscriptions") ?: JSONArray()
+        val channels = (0 until channelsArray.length()).mapNotNull { i ->
+            runCatching { ChannelItem.fromJson(channelsArray.getJSONObject(i)) }.getOrNull()
+        }.distinctBy { it.id }.take(1000)
+        val history = videos("history")
+        val later = videos("watchLater")
+        val queue = videos("queue")
+        val searchesArray = root.optJSONArray("searchHistory") ?: JSONArray()
+        val searches = (0 until searchesArray.length()).mapNotNull { i ->
+            runCatching { searchesArray.getString(i).trim().takeIf { it.isNotEmpty() } }.getOrNull()
+        }.distinct().take(100)
+        _subs.value = channels; saveChannels("subs", channels)
+        _history.value = history; saveVideos("history", history)
+        _later.value = later; saveVideos("later", later)
+        _queue.value = queue; saveVideos("queue", queue)
+        _searches.value = searches; saveStrings("searches", searches)
+        _profile.value = root.optString("profileName"); prefs.edit().putString("profile_name", _profile.value).apply()
+        _prefHeight.value = root.optInt("preferredHeight", 0).coerceIn(0, 4320)
+        _sponsorSkip.value = root.optBoolean("sponsorSkip", true)
+        _autoplay.value = root.optBoolean("autoplayNext", true)
+        _personalizedRecommendations.value = root.optBoolean("personalizedRecommendations", false)
+        prefs.edit()
+            .putInt("pref_height", _prefHeight.value)
+            .putBoolean("sponsor_skip", _sponsorSkip.value)
+            .putBoolean("autoplay_next", _autoplay.value)
+            .putBoolean("personalized_recommendations", _personalizedRecommendations.value)
+            .apply()
+        positions.keys().asSequence().toList().forEach { positions.remove(it) }
+        val importedPositions = root.optJSONObject("positions")
+        if (importedPositions != null) {
+            importedPositions.keys().forEach { key ->
+                val value = importedPositions.optLong(key, 0L)
+                if (key.isNotBlank() && value > 0L) positions.put(key, value)
+            }
+        }
+        prefs.edit().putString("positions", positions.toString()).apply()
+        return channels.size + history.size + later.size + queue.size
+    }
+
     // --------------------------------------------------------- search history
 
     fun addSearch(q: String) {
