@@ -164,7 +164,7 @@ fun WatchScreen(
                     PlayerView(c).apply {
                         player = PlayerHolder.player
                         resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                        setShowSubtitleButton(false)
+                        setShowSubtitleButton(true)
                         setFullscreenButtonClickListener { fullscreen = it }
                     }
                 },
