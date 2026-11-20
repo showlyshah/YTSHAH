@@ -61,6 +61,8 @@ fun AccountScreen(onBack: () -> Unit) {
     val personalized by store.personalizedRecommendations.collectAsStateCompat()
     val cloudAiEnabled by store.cloudAiEnabled.collectAsStateCompat()
     val themeMode by store.themeMode.collectAsStateCompat()
+    val dataSaver by store.dataSaver.collectAsStateCompat()
+    val preferredHeight by store.preferredHeight.collectAsStateCompat()
     val subs by store.subs.collectAsStateCompat()
     val history by store.history.collectAsStateCompat()
     val later by store.later.collectAsStateCompat()
@@ -221,6 +223,17 @@ fun AccountScreen(onBack: () -> Unit) {
         Section("Playback") {
             ToggleRow("Skip sponsor & promo segments", "Uses the community SponsorBlock list", sponsor) { store.setSponsorSkip(it) }
             ToggleRow("Autoplay next video", null, autoplay) { store.setAutoplayNext(it) }
+            ToggleRow("Data saver", "Targets up to 360p automatically on metered networks", dataSaver) { store.setDataSaver(it) }
+            Text("Preferred playback quality")
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(0, 360, 480, 720, 1080).forEach { h ->
+                    FilterChip(
+                        selected = preferredHeight == h,
+                        onClick = { store.setPreferredHeight(h) },
+                        label = { Text(if (h == 0) "Auto" else "${h}p") }
+                    )
+                }
+            }
         }
 
         Section("Hybrid AI intelligence") {
