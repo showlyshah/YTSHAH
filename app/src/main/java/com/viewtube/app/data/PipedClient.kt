@@ -6,6 +6,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
@@ -26,7 +27,14 @@ class PipedClient(
     private val json = "application/json".toMediaType()
 
     val isSignedIn: Boolean get() = secure.get(TOKEN) != null
-    private fun api() = store.pipedServer.value.trimEnd('/')
+    private fun api(): String {
+        val parsed = store.pipedServer.value.trim().toHttpUrlOrNull()
+            ?: throw IOException("Enter a valid HTTPS sync-server URL.")
+        if (parsed.scheme != "https" || parsed.username.isNotEmpty() || parsed.password.isNotEmpty()) {
+            throw IOException("The sync server must use HTTPS and must not contain embedded credentials.")
+        }
+        return parsed.toString().trimEnd('/')
+    }
 
     suspend fun signIn(user: String, pass: String) = authenticate("login", user, pass)
     suspend fun register(user: String, pass: String) = authenticate("register", user, pass)
@@ -51,12 +59,12 @@ class PipedClient(
         }
     }
 
-    /** Merges subscriptions both ways so this device and the account end up identical. */
+    /** Merges the remote and local subscriptions as a union; it does not delete either side. */
     suspend fun sync(): Int = withContext(Dispatchers.IO) {
         val remote = remoteSubscriptions()
         val added = store.addSubs(remote)
         val remoteIds = remote.map { it.id }.toSet()
-        store.subs.value.filter { it.id !in remoteIds }.forEach { runCatching { post("subscribe", it.id) } }
+        store.subs.value.filter { it.id !in remoteIds }.forEach { post("subscribe", it.id) }
         added
     }
 
@@ -68,9 +76,10 @@ class PipedClient(
         http.newCall(req).execute().use { r ->
             if (!r.isSuccessful) throw IOException("Could not load subscriptions (error ${r.code})")
             val arr = JSONArray(r.body?.string().orEmpty())
-            return (0 until arr.length()).map {
+            return (0 until arr.length()).mapNotNull {
                 val o = arr.getJSONObject(it)
-                val id = o.optString("url").substringAfterLast('/')
+                val id = o.optString("url").substringAfterLast('/').substringBefore('?')
+                if (!id.startsWith("UC")) return@mapNotNull null
                 ChannelItem(id, channelUrl(id), o.optString("name"), o.optString("avatar").ifBlank { null })
             }
         }
