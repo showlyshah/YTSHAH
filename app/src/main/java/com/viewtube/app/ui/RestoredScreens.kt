@@ -57,9 +57,12 @@ fun ShortsScreen(onSearch: () -> Unit, onAccount: () -> Unit, onChannel: (String
     var videos by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(Unit) {
+    var reload by remember { mutableIntStateOf(0) }
+    LaunchedEffect(reload) {
+        loading = true
+        error = null
         runCatching { Graph.repo.trending() }
-            .onSuccess { all -> videos = all.filter { it.isShort }.ifEmpty { all.take(12) } }
+            .onSuccess { all -> videos = all.filter { it.isShort } }
             .onFailure { error = it.message ?: "Could not load Shorts." }
         loading = false
     }
@@ -67,7 +70,7 @@ fun ShortsScreen(onSearch: () -> Unit, onAccount: () -> Unit, onChannel: (String
         TopBar(onSearch = onSearch, onAccount = onAccount)
         when {
             loading -> Loading()
-            videos.isEmpty() -> Message("No Shorts available", error ?: "Try again later.")
+            videos.isEmpty() -> Message("No Shorts available", error ?: "No Shorts were found in the current trending results.", "Try again") { reload++ }
             else -> LazyColumn(Modifier.fillMaxSize()) { items(videos, key = { it.id }) { video -> VideoCard(video, { onVideo(video) }, onChannel) } }
         }
     }
