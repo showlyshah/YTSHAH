@@ -38,6 +38,43 @@ class SubscriptionImportTest {
     }
 
     @Test
+    fun channelSerializationRetainsOptionalMetadata() {
+        val original = ChannelItem(
+            id = "UC12345678901",
+            url = "https://www.youtube.com/channel/UC12345678901",
+            name = "Example",
+            avatar = "https://example.com/avatar.jpg",
+            banner = "https://example.com/banner.jpg",
+            subscribers = 1234,
+            description = "Channel description",
+        )
+
+        val restored = ChannelItem.fromJson(original.toJson())
+
+        assertEquals(original, restored)
+    }
+
+    @Test
+    fun videoSerializationRetainsPlaybackMetadata() {
+        val original = VideoItem(
+            id = "abcdefghijk",
+            title = "Example",
+            channelName = "Creator",
+            channelUrl = "https://www.youtube.com/channel/UC12345678901",
+            channelAvatar = null,
+            thumbnail = "https://example.com/thumb.jpg",
+            durationSec = 123,
+            views = 456,
+            publishedText = "yesterday",
+            publishedMs = 123456789L,
+            isLive = false,
+            isShort = true,
+        )
+
+        assertEquals(original, VideoItem.fromJson(original.toJson()))
+    }
+
+    @Test
     fun extractsVideoIdsFromSupportedLinkForms() {
         assertEquals("abcdefghijk", videoIdFromUrl("https://www.youtube.com/watch?v=abcdefghijk"))
         assertEquals("abcdefghijk", videoIdFromUrl("https://youtu.be/abcdefghijk"))
