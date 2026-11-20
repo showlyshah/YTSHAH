@@ -6,6 +6,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import com.viewtube.app.data.Graph
 
 val YtRed = Color(0xFFFF0000)
 val YtChip = Color(0xFFF2F2F2)
@@ -35,8 +36,10 @@ private val Dark = darkColorScheme(
 
 @Composable
 fun ViewTubeTheme(content: @Composable () -> Unit) {
+    val mode by Graph.store.themeMode.collectAsStateCompat()
+    val dark = when (mode) { "dark" -> true; "light" -> false; else -> isSystemInDarkTheme() }
     MaterialTheme(
-        colorScheme = if (isSystemInDarkTheme()) Dark else Light,
+        colorScheme = if (dark) Dark else Light,
         content = content
     )
 }
