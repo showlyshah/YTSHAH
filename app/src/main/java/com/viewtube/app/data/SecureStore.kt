@@ -48,7 +48,15 @@ class SecureStore(context: Context) {
         String(cipher.doFinal(packed.copyOfRange(12, packed.size)))
     }.getOrNull()
 
-    fun clear() = prefs.edit().clear().apply()
+    fun clear() {
+        prefs.edit().clear().apply()
+        runCatching {
+            KeyStore.getInstance("AndroidKeyStore").apply {
+                load(null)
+                deleteEntry(ALIAS)
+            }
+        }
+    }
 
     private companion object {
         const val ALIAS = "viewtube_secrets"
