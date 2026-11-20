@@ -78,7 +78,7 @@ class YouTubeRepo(private val http: OkHttpClient) {
     suspend fun trending(): List<VideoItem> = io {
         val ex = yt.kioskList.defaultKioskExtractor
         ex.fetchPage()
-        ex.initialPage.items.mapNotNull { it.toVideo() }
+        ex.initialPage.items.filterIsInstance<StreamInfoItem>().mapNotNull { it.toVideo() }
     }
 
     // ----------------------------------------------------------------- video
