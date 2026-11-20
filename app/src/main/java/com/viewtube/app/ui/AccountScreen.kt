@@ -232,13 +232,15 @@ fun AccountScreen(onBack: () -> Unit) {
             ToggleRow("Autoplay next video", null, autoplay) { store.setAutoplayNext(it) }
             ToggleRow("Data saver", "Uses lower automatic quality on metered networks; manual Max overrides this", dataSaver) { store.setDataSaver(it) }
             Text("Preferred playback quality")
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf(-1, 0, 360, 480, 720, 1080, 1440, 2160).forEach { h ->
-                    FilterChip(
-                        selected = preferredHeight == h,
-                        onClick = { store.setPreferredHeight(h) },
-                        label = { Text(when (h) { -1 -> "Max"; 0 -> "Auto"; else -> "${h}p" }) }
-                    )
+            listOf(-1, 0, 360, 480, 720, 1080, 1440, 2160).chunked(4).forEach { group ->
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    group.forEach { h ->
+                        FilterChip(
+                            selected = preferredHeight == h,
+                            onClick = { store.setPreferredHeight(h) },
+                            label = { Text(when (h) { -1 -> "Max"; 0 -> "Auto"; else -> "${h}p" }) }
+                        )
+                    }
                 }
             }
             Text("Preferred audio quality")
