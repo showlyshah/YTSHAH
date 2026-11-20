@@ -22,6 +22,8 @@ class LocalStore(context: Context) {
     private val _prefHeight = MutableStateFlow(prefs.getInt("pref_height", 0))
     private val _sponsorSkip = MutableStateFlow(prefs.getBoolean("sponsor_skip", true))
     private val _autoplay = MutableStateFlow(prefs.getBoolean("autoplay_next", true))
+    private val _pipedServer = MutableStateFlow(prefs.getString("piped_server", "https://pipedapi.adminforge.de").orEmpty())
+    private val _pipedUser = MutableStateFlow(prefs.getString("piped_user", "")?.ifBlank { null })
     private val positions = JSONObject(prefs.getString("positions", "{}") ?: "{}")
 
     val subs: StateFlow<List<ChannelItem>> = _subs.asStateFlow()
@@ -33,6 +35,8 @@ class LocalStore(context: Context) {
     val preferredHeight: StateFlow<Int> = _prefHeight.asStateFlow()
     val sponsorSkip: StateFlow<Boolean> = _sponsorSkip.asStateFlow()
     val autoplayNext: StateFlow<Boolean> = _autoplay.asStateFlow()
+    val pipedServer: StateFlow<String> = _pipedServer.asStateFlow()
+    val pipedUser: StateFlow<String?> = _pipedUser.asStateFlow()
 
     // ---------------------------------------------------------- subscriptions
 
@@ -101,6 +105,8 @@ class LocalStore(context: Context) {
     fun setPreferredHeight(h: Int) { _prefHeight.value = h; prefs.edit().putInt("pref_height", h).apply() }
     fun setSponsorSkip(on: Boolean) { _sponsorSkip.value = on; prefs.edit().putBoolean("sponsor_skip", on).apply() }
     fun setAutoplayNext(on: Boolean) { _autoplay.value = on; prefs.edit().putBoolean("autoplay_next", on).apply() }
+    fun setPipedServer(server: String) { _pipedServer.value = server.trim().trimEnd('/'); prefs.edit().putString("piped_server", _pipedServer.value).apply() }
+    fun setPipedUser(user: String?) { _pipedUser.value = user?.trim()?.takeIf { it.isNotEmpty() }; prefs.edit().putString("piped_user", _pipedUser.value.orEmpty()).apply() }
 
     // --------------------------------------------------------- search history
 
@@ -124,6 +130,7 @@ class LocalStore(context: Context) {
         _subs.value = emptyList(); _history.value = emptyList(); _later.value = emptyList()
         _profile.value = ""; _searches.value = emptyList(); _prefHeight.value = 0
         _sponsorSkip.value = true; _autoplay.value = true
+        _pipedServer.value = "https://pipedapi.adminforge.de"; _pipedUser.value = null
         positions.keys().asSequence().toList().forEach { positions.remove(it) }
     }
 
