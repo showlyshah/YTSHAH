@@ -9,6 +9,11 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
+import androidx.media3.datasource.cache.SimpleCache
+import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.dash.DashMediaSource
@@ -33,6 +38,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.asSharedFlow
 import org.schabi.newpipe.extractor.MediaFormat
+import java.io.File
 import org.schabi.newpipe.extractor.stream.AudioStream
 import org.schabi.newpipe.extractor.stream.DeliveryMethod
 import org.schabi.newpipe.extractor.stream.Stream
@@ -44,8 +50,16 @@ import org.schabi.newpipe.extractor.stream.VideoStream
  */
 @UnstableApi
 object PlayerHolder {
+    private const val MAX_CACHE_BYTES = 256L * 1024L * 1024L
     private lateinit var appContext: Context
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val mediaCache: SimpleCache by lazy {
+        SimpleCache(
+            File(appContext.cacheDir, "viewtube_stream_cache"),
+            LeastRecentlyUsedCacheEvictor(MAX_CACHE_BYTES),
+            StandaloneDatabaseProvider(appContext)
+        )
+    }
 
     val player: ExoPlayer by lazy { buildPlayer() }
 
@@ -86,10 +100,8 @@ object PlayerHolder {
     }
 
     private fun buildPlayer(): ExoPlayer {
-        val http = OkHttpDataSource.Factory(Graph.http)
-        val factory = DefaultDataSource.Factory(appContext) { YtDataSource(http.createDataSource()) }
         val p = ExoPlayer.Builder(appContext)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(factory))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(sourceFactory()))
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
@@ -129,9 +141,20 @@ object PlayerHolder {
         }
     }
 
-    private fun sourceFactory(): DefaultDataSource.Factory {
+    private fun sourceFactory(): DataSource.Factory {
         val http = OkHttpDataSource.Factory(Graph.http)
-        return DefaultDataSource.Factory(appContext) { YtDataSource(http.createDataSource()) }
+        val upstream = DefaultDataSource.Factory(appContext) { YtDataSource(http.createDataSource()) }
+        return CacheDataSource.Factory()
+            .setCache(mediaCache)
+            .setUpstreamDataSourceFactory(upstream)
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+    }
+
+    fun playbackCacheBytes(): Long = runCatching { mediaCache.cacheSpace }.getOrDefault(0L)
+
+    /** Clears temporary playback cache only; never touches Watch later, history or downloads. */
+    fun clearPlaybackCache() {
+        runCatching { mediaCache.keys.toList().forEach { mediaCache.removeResource(it) } }
     }
 
     // ------------------------------------------------------------- stream pick
