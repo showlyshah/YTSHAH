@@ -16,6 +16,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -46,21 +47,23 @@ fun ChannelScreen(url: String, onBack: () -> Unit, onVideo: (VideoItem) -> Unit,
     var videos by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
     var next by remember { mutableStateOf<(suspend () -> Paged<VideoItem>)?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var pageError by remember { mutableStateOf<String?>(null) }
     var loadingMore by remember { mutableStateOf(false) }
     var attempt by remember { mutableIntStateOf(0) }
     val list = rememberLazyListState()
 
     LaunchedEffect(url, attempt) {
-        error = null
+        error = null; page = null; videos = emptyList(); next = null; pageError = null
         runCatching { Graph.repo.channel(url) }
             .onSuccess { page = it; videos = it.videos.items; next = it.videos.next }
             .onFailure { error = errorText(it) }
     }
-    LoadMoreEffect(list, next != null && !loadingMore) {
+    LoadMoreEffect(list, next != null && !loadingMore && pageError == null) {
         val n = next ?: return@LoadMoreEffect
         loadingMore = true
         scope.launch {
-            runCatching { n() }.onSuccess { videos = (videos + it.items).distinctBy { video -> video.id }; next = it.next }
+            runCatching { n() }.onSuccess { videos = (videos + it.items).distinctBy { video -> video.id }; next = it.next; pageError = null }
+                .onFailure { pageError = errorText(it) }
             loadingMore = false
         }
     }
@@ -94,6 +97,14 @@ fun ChannelScreen(url: String, onBack: () -> Unit, onVideo: (VideoItem) -> Unit,
                 }
                 items(videos, key = { it.id }) { v -> VideoCard(v, { onVideo(v) }, onChannel) }
                 if (loadingMore) item { Loading(Modifier.fillMaxWidth().height(64.dp)) }
+                pageError?.let { message ->
+                    item {
+                        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(message, Modifier.weight(1f), color = MaterialTheme.colorScheme.error)
+                            TextButton(onClick = { pageError = null }) { Text("Retry") }
+                        }
+                    }
+                }
             }
         }
     }
