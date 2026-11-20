@@ -36,7 +36,7 @@ class Paged<T>(val items: List<T>, val next: (suspend () -> Paged<T>)?)
 
 class ChannelPage(val channel: ChannelItem, val videos: Paged<VideoItem>)
 
-private val VIDEO_ID = Regex("""(?i)(?:https?://)?(?:(?:www|m)\.)?(?:youtube\.com/(?:watch\?[^\\s#]*?\\bv=|shorts/|embed/|live/)|youtu\.be/)([\\w-]{11})(?=$|[?&#/\\s.,])""")
+private val VIDEO_ID = Regex("""(?i)(?:https?://)?(?:(?:www|m)\.)?(?:youtube\.com/(?:watch\?[^\s#]*?\bv=|shorts/|embed/|live/)|youtu\.be/)([\w-]{11})(?=$|[?&#/\s.,])""")
 fun videoIdFromUrl(url: String): String? = VIDEO_ID.find(url)?.groupValues?.get(1)
 
 const val FILTER_VIDEOS = "videos"
