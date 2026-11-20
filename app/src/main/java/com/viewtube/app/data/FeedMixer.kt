@@ -1,42 +1,68 @@
 package com.viewtube.app.data
 
+import kotlinx.coroutines.CancellationException
+
 /**
- * Endless home feed. Round-robins over several topic searches, each with its own "next page"
- * cursor, so there is always more to load and the mix stays varied.
+ * Endless discovery feed. Each topic owns an independent continuation cursor.
+ *
+ * A failed request does not consume its cursor: the next call can retry it. Each invocation
+ * tries each currently active topic at most once, so a broken endpoint cannot create a tight
+ * retry loop or block the UI.
  */
 class FeedMixer(
     topics: List<String>,
     private val repo: YouTubeRepo,
     private val accept: (VideoItem) -> Boolean,
 ) {
-    private class Cursor(val topic: String, var next: (suspend () -> Paged<Item>)?, var started: Boolean = false)
+    private class Cursor(
+        val topic: String,
+        var next: (suspend () -> Paged<Item>)? = null,
+        var started: Boolean = false,
+    )
 
-    private val cursors = topics.distinct().map { Cursor(it, null) }.toMutableList()
+    private val cursors = topics.map(String::trim).filter(String::isNotEmpty).distinct()
+        .map { Cursor(it) }.toMutableList()
     private val seen = HashSet<String>()
     private var turn = 0
 
+    /** Last transient error, if any. Cleared at the beginning of the next load attempt. */
+    var lastError: Throwable? = null
+        private set
+
     val exhausted: Boolean get() = cursors.isEmpty()
 
-    /** Loads until at least [min] new videos were found (or sources run out). */
     suspend fun more(min: Int = 10): List<VideoItem> {
+        if (min <= 0 || cursors.isEmpty()) return emptyList()
+        lastError = null
         val out = mutableListOf<VideoItem>()
-        var failures = 0
-        while (out.size < min && cursors.isNotEmpty() && failures < 6) {
-            val c = cursors[turn % cursors.size]
-            turn++
-            val page = runCatching {
-                if (!c.started) { c.started = true; repo.search(c.topic, FILTER_VIDEOS) }
-                else c.next?.invoke()
-            }.getOrNull()
-            if (page == null) {
-                failures++
-                cursors.remove(c)
-                continue
-            }
-            c.next = page.next
-            if (page.next == null) cursors.remove(c)
-            for (v in page.items.filterIsInstance<VideoItem>()) {
-                if (accept(v) && seen.add(v.id)) out += v
+        val count = cursors.size
+        val start = Math.floorMod(turn, count)
+        turn = (start + 1) % count
+        val batch = (0 until count).map { cursors[(start + it) % count] }
+
+        for (cursor in batch) {
+            if (out.size >= min) break
+            try {
+                val page = if (cursor.started) {
+                    cursor.next?.invoke()
+                } else {
+                    repo.search(cursor.topic, FILTER_VIDEOS)
+                }
+                if (page == null) {
+                    cursors.remove(cursor)
+                    continue
+                }
+                cursor.started = true
+                cursor.next = page.next
+                if (page.next == null) cursors.remove(cursor)
+                page.items.filterIsInstance<VideoItem>().forEach { video ->
+                    if (accept(video) && seen.add(video.id)) out += video
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                // Keep this cursor exactly where it was so a later call can retry it.
+                lastError = error
             }
         }
         return out
