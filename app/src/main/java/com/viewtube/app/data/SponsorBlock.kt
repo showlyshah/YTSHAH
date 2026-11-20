@@ -1,5 +1,6 @@
 package com.viewtube.app.data
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -18,7 +19,7 @@ class SponsorBlock(private val http: OkHttpClient) {
     data class Segment(val startMs: Long, val endMs: Long, val category: String)
 
     suspend fun segments(videoId: String): List<Segment> = withContext(Dispatchers.IO) {
-        runCatching {
+        try {
             val hash = MessageDigest.getInstance("SHA-256")
                 .digest(videoId.toByteArray())
                 .joinToString("") { "%02x".format(it) }
@@ -51,6 +52,10 @@ class SponsorBlock(private val http: OkHttpClient) {
                 }
                 out.sortedBy { it.startMs }
             }
-        }.getOrDefault(emptyList())
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 }
