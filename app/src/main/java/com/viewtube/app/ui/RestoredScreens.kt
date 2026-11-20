@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
@@ -49,6 +50,9 @@ fun MiniPlayer(onOpen: (String) -> Unit) {
         }
         IconButton(onClick = { PlayerHolder.toggle() }, modifier = Modifier.size(40.dp)) {
             Text(if (playing) "Ⅱ" else "▶", fontWeight = FontWeight.Bold)
+        }
+        IconButton(onClick = { PlayerHolder.stop() }, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Default.Close, contentDescription = "Close mini player")
         }
     }
 }
