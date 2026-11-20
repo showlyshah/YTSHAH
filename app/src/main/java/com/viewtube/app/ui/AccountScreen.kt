@@ -76,6 +76,7 @@ fun AccountScreen(onBack: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
     var confirmWipe by remember { mutableStateOf(false) }
+    var pendingBackup by remember { mutableStateOf<String?>(null) }
     var aiBaseUrl by remember { mutableStateOf(Graph.secure.get(com.viewtube.app.data.OpenAiCompatibleProvider.KEY_BASE_URL) ?: com.viewtube.app.data.OpenAiCompatibleProvider.DEFAULT_BASE_URL) }
     var aiModel by remember { mutableStateOf(Graph.secure.get(com.viewtube.app.data.OpenAiCompatibleProvider.KEY_MODEL) ?: com.viewtube.app.data.OpenAiCompatibleProvider.DEFAULT_MODEL) }
     var aiKey by remember { mutableStateOf("") }
@@ -114,8 +115,11 @@ fun AccountScreen(onBack: () -> Unit) {
                         ?: error("Couldn't read the selected file.")
                 }
                 require(raw.length <= 5_000_000) { "Backup file is too large." }
-                val restored = store.importBackup(raw)
-                "Backup restored. Imported ${restored} saved items and subscriptions."
+                org.json.JSONObject(raw).also {
+                    require(it.optInt("version", -1) == 1) { "Unsupported backup version." }
+                }
+                pendingBackup = raw
+                "Backup file validated. Confirm replacement below."
             }.getOrElse { "Backup restore failed: ${it.message ?: "invalid backup"}" }
         }
     }
@@ -355,6 +359,24 @@ fun AccountScreen(onBack: () -> Unit) {
         }
 
         status?.let { Text(it, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.primary) }
+    }
+
+    pendingBackup?.let { backup ->
+        AlertDialog(
+            onDismissRequest = { pendingBackup = null },
+            title = { Text("Restore ViewTube backup?") },
+            text = { Text("This replaces the current subscriptions, history, Watch later, queue and settings with the selected backup. Export your current data first if you may need it.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    status = runCatching {
+                        val restored = store.importBackup(backup)
+                        "Backup restored. Imported ${restored} saved items and subscriptions."
+                    }.getOrElse { "Backup restore failed: ${it.message ?: "invalid backup"}" }
+                    pendingBackup = null
+                }) { Text("Restore") }
+            },
+            dismissButton = { TextButton(onClick = { pendingBackup = null }) { Text("Cancel") } }
+        )
     }
 
     if (confirmWipe) AlertDialog(
