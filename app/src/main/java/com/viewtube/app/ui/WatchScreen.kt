@@ -187,6 +187,7 @@ fun WatchScreen(
                 kotlinx.coroutines.delay(180)
             }
         } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
             translationError = error.message ?: "Translation is unavailable for this subtitle track."
             translatedCaption = null
         } finally {
@@ -207,7 +208,7 @@ fun WatchScreen(
         if (act != null) {
             val ctl = WindowInsetsControllerCompat(act.window, act.window.decorView)
             if (fullscreen) act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-            else act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            else if (!landscape) act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             if (immersivePlayer) {
                 ctl.hide(WindowInsetsCompat.Type.systemBars())
                 ctl.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
