@@ -89,7 +89,7 @@ class LocalStore(context: Context) {
             positions.put(videoId, ms)
             // Keep resume metadata bounded even if the user watches thousands of videos.
             val keys = positions.keys().asSequence().toList()
-            keys.take((keys.size - MAX_SAVED_POSITIONS).coerceAtLeast(0)).forEach(positions::remove)
+            keys.take((keys.size - MAX_SAVED_POSITIONS).coerceAtLeast(0)).forEach { positions.remove(it) }
         }
         prefs.edit().putString("positions", positions.toString()).apply()
     }
