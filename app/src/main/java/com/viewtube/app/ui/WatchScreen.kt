@@ -25,6 +25,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -163,6 +166,22 @@ fun WatchScreen(
             if (!fullscreen) IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart)) {
                 Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Minimize", tint = Color.White)
             }
+            IconButton(
+                onClick = { fullscreen = !fullscreen },
+                modifier = Modifier.align(Alignment.TopEnd),
+            ) {
+                Icon(
+                    if (fullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                    contentDescription = if (fullscreen) "Exit fullscreen" else "Enter fullscreen",
+                    tint = Color.White,
+                )
+            }
+            IconButton(
+                onClick = { sheet = true },
+                modifier = Modifier.align(Alignment.BottomEnd),
+            ) {
+                Icon(Icons.Default.MoreVert, contentDescription = "Playback settings", tint = Color.White)
+            }
             notice?.let {
                 Text(
                     it, color = Color.White, fontSize = 13.sp,
@@ -175,9 +194,7 @@ fun WatchScreen(
 
     if (fullscreen) {
         playerBox(Modifier.fillMaxSize())
-        return
-    }
-
+    } else {
     Column(Modifier.fillMaxSize()) {
         playerBox(Modifier.fillMaxWidth().aspectRatio(16f / 9f))
         val d = details
@@ -258,6 +275,7 @@ fun WatchScreen(
                 items(d.related, key = { it.id }) { v -> VideoRow(v) { onVideo(v.id) } }
             }
         }
+    }
     }
     val dd = details
     if (sheet && dd != null) ModalBottomSheet(onDismissRequest = { sheet = false }) {
