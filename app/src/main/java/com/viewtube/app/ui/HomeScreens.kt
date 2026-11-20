@@ -299,12 +299,22 @@ fun SubscriptionsScreen(onSearch: () -> Unit, onAccount: () -> Unit, onVideo: (V
     val subs by Graph.store.subs.collectAsStateCompat()
     var videos by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(subs.map { it.id }, reload) {
         loading = subs.isNotEmpty()
-        videos = if (subs.isEmpty()) emptyList() else Graph.repo.feed(subs.map { it.id })
-        loading = false
+        error = null
+        try {
+            videos = if (subs.isEmpty()) emptyList() else Graph.repo.feed(subs.map { it.id })
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            error = errorText(failure)
+            videos = emptyList()
+        } finally {
+            loading = false
+        }
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -318,16 +328,24 @@ fun SubscriptionsScreen(onSearch: () -> Unit, onAccount: () -> Unit, onVideo: (V
             LazyColumn(Modifier.fillMaxSize()) {
                 item {
                     LazyRow(Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp)) {
-                        items(subs, key = { it.id }) { c ->
-                            Column(Modifier.width(64.dp).clickable { onChannel(c.url) }, horizontalAlignment = Alignment.CenterHorizontally) {
-                                Avatar(c.avatar, 52)
-                                Text(c.name, fontSize = 11.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+                        items(subs, key = { it.id }) { channel ->
+                            Column(Modifier.width(64.dp).clickable { onChannel(channel.url) }, horizontalAlignment = Alignment.CenterHorizontally) {
+                                Avatar(channel.avatar, 52)
+                                Text(channel.name, fontSize = 11.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
                             }
                         }
                     }
                 }
                 if (loading) item { Loading(Modifier.fillMaxWidth().height(200.dp)) }
-                items(videos, key = { it.id }) { v -> VideoCard(v, { onVideo(v) }, onChannel) }
+                else if (error != null) item {
+                    Message("Couldn't load subscriptions", error, "Try again") { reload++ }
+                }
+                else if (videos.isEmpty()) item {
+                    Message("No recent uploads", "Your subscribed channels don't have any recent videos available.")
+                }
+                else items(videos, key = { it.id }) { video ->
+                    VideoCard(video, { onVideo(video) }, onChannel)
+                }
             }
         }
     }
