@@ -94,6 +94,11 @@ object PlayerHolder {
     private var segments: List<SponsorBlock.Segment> = emptyList()
     private var watcher: Job? = null
     private var saver: Job? = null
+    private var sleepJob: Job? = null
+    private val _sleepRemainingMs = MutableStateFlow<Long?>(null)
+    val sleepRemainingMs: StateFlow<Long?> = _sleepRemainingMs.asStateFlow()
+    private val _repeatMode = MutableStateFlow("continuous")
+    val repeatMode: StateFlow<String> = _repeatMode.asStateFlow()
 
     fun init(context: Context) {
         appContext = context.applicationContext
@@ -125,7 +130,8 @@ object PlayerHolder {
 
     private fun onEnded() {
         val d = _current.value ?: return
-        if (loopRepeatEnabled || d.isLive || !Graph.store.autoplayNext.value) return
+        if (loopRepeatEnabled || d.isLive || _repeatMode.value == "one") return
+        if (_repeatMode.value == "off" || !Graph.store.autoplayNext.value) return
         // A user-curated queue always takes precedence over automatic related videos.
         val next = Graph.store.dequeueNext()
             ?: d.related.firstOrNull { !Graph.store.isWatched(it.id) }
@@ -231,6 +237,7 @@ object PlayerHolder {
     ) {
         loopRepeatEnabled = loop
         _looping.value = loop
+        _repeatMode.value = if (loop) "one" else "continuous"
         player.repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
         _audioTrack.value = audioTrackId
         val same = _current.value?.video?.id == d.video.id
@@ -281,7 +288,7 @@ object PlayerHolder {
 
     fun stop() {
         saveProgress()
-        watcher?.cancel(); saver?.cancel()
+        watcher?.cancel(); saver?.cancel(); sleepJob?.cancel(); sleepJob = null; _sleepRemainingMs.value = null
         player.stop()
         player.clearMediaItems()
         _current.value = null
@@ -304,10 +311,40 @@ object PlayerHolder {
         player.seekTo(if (duration > 0L) target.coerceAtMost(duration) else target)
     }
 
-    fun setLooping(on: Boolean) {
-        loopRepeatEnabled = on
-        _looping.value = on
-        player.repeatMode = if (on) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+    fun setLooping(on: Boolean) { setRepeatMode(if (on) "one" else "continuous") }
+
+    /** off = stop after this video, one = repeat current video, continuous = advance to next. */
+    fun setRepeatMode(mode: String) {
+        val safe = mode.takeIf { it in setOf("off", "one", "continuous") } ?: "continuous"
+        _repeatMode.value = safe
+        loopRepeatEnabled = safe == "one"
+        _looping.value = safe == "one"
+        player.repeatMode = if (safe == "one") Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+        Graph.store.setAutoplayNext(safe == "continuous")
+    }
+
+    fun setSleepTimer(minutes: Int) {
+        sleepJob?.cancel()
+        if (minutes <= 0) { _sleepRemainingMs.value = null; return }
+        val duration = minutes.coerceIn(1, 240) * 60_000L
+        _sleepRemainingMs.value = duration
+        sleepJob = scope.launch {
+            var left = duration
+            while (left > 0L) {
+                delay(1_000)
+                left -= 1_000
+                _sleepRemainingMs.value = left.coerceAtLeast(0L)
+            }
+            player.pause()
+            _sleepRemainingMs.value = null
+            sleepJob = null
+        }
+    }
+
+    fun cancelSleepTimer() {
+        sleepJob?.cancel()
+        sleepJob = null
+        _sleepRemainingMs.value = null
     }
 
     /** Disables only the video renderer; audio continues through the same media session. */
