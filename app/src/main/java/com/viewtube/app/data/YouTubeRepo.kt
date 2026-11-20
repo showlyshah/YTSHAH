@@ -129,8 +129,8 @@ class YouTubeRepo(private val http: OkHttpClient) {
         http.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw IllegalStateException("Subtitle download failed (" + response.code + ").")
             val raw = response.body?.string().orEmpty()
-            val timing = Regex("""(?m)^(\\d{1,2}:)?\\d{2}:\\d{2}[.,]\\d{3}\\s*-->\\s*(\\d{1,2}:)?\\d{2}:\\d{2}[.,]\\d{3}.*$""")
-            val lines = raw.replace("\\r", "").lines()
+            val timing = Regex("""(?m)^(\d{1,2}:)?\d{2}:\d{2}[.,]\d{3}\s*-->\s*(\d{1,2}:)?\d{2}:\d{2}[.,]\d{3}.*$""")
+            val lines = raw.replace("\r", "").lines()
             val out = mutableListOf<SubtitleCue>()
             var i = 0
             while (i < lines.size) {
