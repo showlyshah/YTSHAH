@@ -57,6 +57,7 @@ fun AccountScreen(onBack: () -> Unit) {
     val pipedUser by store.pipedUser.collectAsStateCompat()
     val sponsor by store.sponsorSkip.collectAsStateCompat()
     val autoplay by store.autoplayNext.collectAsStateCompat()
+    val personalized by store.personalizedRecommendations.collectAsStateCompat()
     val subs by store.subs.collectAsStateCompat()
 
     var nameField by remember(name) { mutableStateOf(name) }
@@ -150,6 +151,10 @@ fun AccountScreen(onBack: () -> Unit) {
                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }) { Text("Import subscriptions file") }
+        }
+
+        Section("Discovery") {
+            ToggleRow("Personalized recommendations", "Uses watch history locally on this phone; disabled by default", personalized) { store.setPersonalizedRecommendations(it) }
         }
 
         Section("Playback") {
