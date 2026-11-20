@@ -110,6 +110,7 @@ fun WatchScreen(
     val looping by PlayerHolder.looping.collectAsStateCompat()
     val audioOnly by PlayerHolder.audioOnly.collectAsStateCompat()
     val prefHeight by Graph.store.preferredHeight.collectAsStateCompat()
+    val prefAudioBitrate by Graph.store.preferredAudioBitrate.collectAsStateCompat()
     val height by PlayerHolder.height.collectAsStateCompat()
     val notice by PlayerHolder.skipNotice.collectAsStateCompat()
     val subs by Graph.store.subs.collectAsStateCompat()
@@ -361,10 +362,25 @@ fun WatchScreen(
                 runCatching { PlayerHolder.play(dd, PlayerHolder.defaultHeight(dd)) }.onFailure { error = errorText(it) }
                 sheet = false
             }
+            SheetRow("Max available", prefHeight == -1) {
+                Graph.store.setPreferredHeight(-1)
+                runCatching { PlayerHolder.play(dd, PlayerHolder.defaultHeight(dd)) }.onFailure { error = errorText(it) }
+                sheet = false
+            }
             heights.forEach { h ->
-                SheetRow("${h}p", height == h && prefHeight != 0) {
+                SheetRow("${h}p", height == h && prefHeight == h) {
                     Graph.store.setPreferredHeight(h)
                     runCatching { PlayerHolder.play(dd, h) }.onFailure { error = errorText(it) }
+                    sheet = false
+                }
+            }
+            SheetTitle("Audio quality")
+            listOf(0, 320000, 256000, 192000, 128000).forEach { bitrate ->
+                SheetRow(if (bitrate == 0) "Highest available" else "$bitrate kbps or nearest available", prefAudioBitrate == bitrate) {
+                    Graph.store.setPreferredAudioBitrate(bitrate)
+                    runCatching {
+                        PlayerHolder.play(dd, height.takeIf { it > 0 } ?: PlayerHolder.defaultHeight(dd), audioTrackId = audioSel)
+                    }.onFailure { error = errorText(it) }
                     sheet = false
                 }
             }
