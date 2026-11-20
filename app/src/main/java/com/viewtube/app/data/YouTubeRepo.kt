@@ -2,6 +2,7 @@ package com.viewtube.app.data
 
 import android.util.Xml
 import androidx.core.text.HtmlCompat
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -124,9 +125,14 @@ class YouTubeRepo(private val http: OkHttpClient) {
 
     suspend fun comments(id: String): Paged<Comment> = io {
         val url = watchUrl(id)
-        runCatching { CommentsInfo.getInfo(yt, url) }
-            .map { info -> commentsPaged(url, info.relatedItems, info.nextPage) }
-            .getOrElse { Paged(emptyList(), null) } // comments switched off, or failed to load
+        try {
+            val info = CommentsInfo.getInfo(yt, url)
+            commentsPaged(url, info.relatedItems, info.nextPage)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            Paged(emptyList(), null) // comments may be disabled or unavailable for this video
+        }
     }
 
     private fun commentsPaged(
