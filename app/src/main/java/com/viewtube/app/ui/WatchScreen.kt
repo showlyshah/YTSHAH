@@ -309,10 +309,10 @@ fun WatchScreen(
             }
             translatedCaption?.let { caption ->
                 Text(
-                    caption, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium,
+                    caption, color = Color.White, fontSize = 12.sp, lineHeight = 15.sp, fontWeight = FontWeight.Normal,
                     modifier = Modifier.align(Alignment.BottomCenter).padding(horizontal = 22.dp, vertical = 58.dp)
                         .clip(RoundedCornerShape(10.dp)).background(Color(0xD9000000))
-                        .padding(horizontal = 14.dp, vertical = 9.dp)
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
                 )
             }
             notice?.let {
