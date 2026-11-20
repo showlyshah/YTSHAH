@@ -94,9 +94,9 @@ class MainActivity : ComponentActivity() {
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
-    override fun onPause() {
+    override fun onStop() {
         window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        super.onPause()
+        super.onStop()
     }
 
     override fun onNewIntent(intent: Intent) {
