@@ -36,7 +36,7 @@ class Paged<T>(val items: List<T>, val next: (suspend () -> Paged<T>)?)
 
 class ChannelPage(val channel: ChannelItem, val videos: Paged<VideoItem>)
 
-private val VIDEO_ID = Regex("""(?:[?&]v=|youtu\.be/|/shorts/|/embed/|/live/)([\w-]{11})""")
+private val VIDEO_ID = Regex("""(?i)(?:https?://)?(?:(?:www|m)\.)?(?:youtube\.com/(?:watch\?[^\\s#]*?\\bv=|shorts/|embed/|live/)|youtu\.be/)([\\w-]{11})(?=$|[?&#/\\s.,])""")
 fun videoIdFromUrl(url: String): String? = VIDEO_ID.find(url)?.groupValues?.get(1)
 
 const val FILTER_VIDEOS = "videos"
@@ -50,7 +50,9 @@ class YouTubeRepo(private val http: OkHttpClient) {
     // ---------------------------------------------------------------- search
 
     suspend fun suggestions(query: String): List<String> = io {
-        runCatching { yt.suggestionExtractor.suggestionList(query) }.getOrDefault(emptyList())
+        try { yt.suggestionExtractor.suggestionList(query) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { emptyList() }
     }
 
     /** [filter] is FILTER_VIDEOS or FILTER_CHANNELS, or null for everything. */
@@ -205,7 +207,11 @@ class YouTubeRepo(private val http: OkHttpClient) {
         channelIds
             .map { id ->
                 async(Dispatchers.IO) {
-                    gate.withPermit { runCatching { rss(id, perChannel) }.getOrDefault(emptyList()) }
+                    gate.withPermit {
+                        try { rss(id, perChannel) }
+                        catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { emptyList() }
+                    }
                 }
             }
             .awaitAll()
