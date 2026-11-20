@@ -1,6 +1,6 @@
 package com.viewtube.app.data
 
-import java.io.ConnectException
+import java.net.ConnectException
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
