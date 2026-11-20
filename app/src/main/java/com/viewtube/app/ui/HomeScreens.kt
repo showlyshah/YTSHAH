@@ -196,6 +196,7 @@ fun SearchScreen(initialQuery: String, onBack: () -> Unit, onVideo: (VideoItem) 
         results = emptyList()
         next = null
         pageError = null
+        loadingMore = false
         reload++
     }
 
@@ -237,24 +238,27 @@ fun SearchScreen(initialQuery: String, onBack: () -> Unit, onVideo: (VideoItem) 
 
     LoadMoreEffect(list, next != null && !loadingMore && pageError == null) {
         val n = next ?: return@LoadMoreEffect
+        val generation = reload
         loadingMore = true
         scope.launch {
             try {
                 val page = n()
-                results = (results + page.items).distinctBy { item ->
-                    when (item) {
-                        is VideoItem -> "v:" + item.id
-                        is ChannelItem -> "c:" + item.id
+                if (reload == generation) {
+                    results = (results + page.items).distinctBy { item ->
+                        when (item) {
+                            is VideoItem -> "v:" + item.id
+                            is ChannelItem -> "c:" + item.id
+                        }
                     }
+                    next = page.next
+                    pageError = null
                 }
-                next = page.next
-                pageError = null
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
-                pageError = errorText(failure)
+                if (reload == generation) pageError = errorText(failure)
             } finally {
-                loadingMore = false
+                if (reload == generation) loadingMore = false
             }
         }
     }
