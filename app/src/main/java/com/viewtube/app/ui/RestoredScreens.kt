@@ -37,6 +37,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.media3.ui.PlayerView
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.common.util.UnstableApi
+import androidx.compose.ui.viewinterop.AndroidView
 import com.viewtube.app.data.Graph
 import com.viewtube.app.data.FeedDiagnostics
 import com.viewtube.app.data.RuntimeDiagnostics
@@ -69,6 +73,7 @@ fun MiniPlayer(onOpen: (String) -> Unit) {
     }
 }
 
+@OptIn(UnstableApi::class)
 @Composable
 fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
     DisposableEffect(Unit) {
@@ -101,7 +106,7 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
             RuntimeDiagnostics.record("SHORTS_UI", "initial-load-results", if (videos.isEmpty()) "empty" else "success", "videos=${videos.size}, hasContinuation=${page.next != null}")
             FeedDiagnostics.record("shorts", "initial-feed", if (videos.isEmpty()) "empty" else "success",
                 android.os.SystemClock.elapsedRealtime() - started, videos.size,
-                detail = "verticalPager=true, hasContinuation=${page.next != null}")
+                detail = "verticalPager=true, inlinePlayer=true, hasContinuation=${page.next != null}")
         }.onFailure {
             if (it is CancellationException) throw it
             FeedDiagnostics.record("shorts", "initial-feed", "failure",
@@ -142,21 +147,18 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
         }
     }
 
-    // Fetch the next page before the viewer reaches the end of the current batch.
     LaunchedEffect(pagerState.currentPage, videos.size) {
         if (videos.isNotEmpty() && pagerState.currentPage >= videos.size - 3) loadMore()
     }
 
-    Column(Modifier.fillMaxSize()) {
-        TopBar(onSearch = {}, onAccount = {})
+    Column(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black)) {
         when {
-            loading -> Loading()
-            videos.isEmpty() ->
-                Message(
-                    if (error != null) "Couldn't load Shorts" else "No Shorts found",
-                    error ?: "The source did not return any videos identified as Shorts.",
-                    "Try again"
-                ) { reload++ }
+            loading && videos.isEmpty() -> Loading()
+            videos.isEmpty() -> Message(
+                if (error != null) "Couldn't load Shorts" else "No Shorts found",
+                error ?: "The source did not return any videos identified as Shorts.",
+                "Try again"
+            ) { reload++ }
             else -> androidx.compose.foundation.layout.Box(
                 Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black)
             ) {
@@ -166,27 +168,69 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
                     key = { page -> videos[page].id }
                 ) { page ->
                     val video = videos[page]
-                    androidx.compose.foundation.layout.Box(
-                        Modifier.fillMaxSize().clickable { onVideo(video) }
-                    ) {
-                        coil.compose.AsyncImage(
-                            model = video.thumbnail,
-                            contentDescription = video.title,
-                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
+                    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+                        if (page == pagerState.currentPage) {
+                            LaunchedEffect(video.id) {
+                                RuntimeDiagnostics.record("SHORTS_UI", "inline-play-request", "started", "videoId=${video.id}")
+                                runCatching { Graph.repo.details(video.id) }
+                                    .onSuccess { details ->
+                                        Graph.store.addHistory(details.video)
+                                        runCatching { PlayerHolder.play(details) }
+                                            .onSuccess {
+                                                RuntimeDiagnostics.record("SHORTS_UI", "inline-play", "success", "videoId=${video.id}")
+                                            }
+                                            .onFailure {
+                                                error = it.message ?: "This Short could not be played."
+                                                RuntimeDiagnostics.record("SHORTS_UI", "inline-play", "failure", "videoId=${video.id}", it)
+                                            }
+                                    }
+                                    .onFailure {
+                                        error = it.message ?: "Could not load this Short."
+                                        RuntimeDiagnostics.record("SHORTS_UI", "inline-details", "failure", "videoId=${video.id}", it)
+                                    }
+                            }
+                            AndroidView(
+                                factory = { context ->
+                                    PlayerView(context).apply {
+                                        player = PlayerHolder.player
+                                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                                        useController = true
+                                        setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
+                                    }
+                                },
+                                update = { view ->
+                                    if (view.player !== PlayerHolder.player) view.player = PlayerHolder.player
+                                },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            coil.compose.AsyncImage(
+                                model = video.thumbnail,
+                                contentDescription = video.title,
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
                         Column(
                             Modifier.align(Alignment.BottomStart).fillMaxWidth()
-                                .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.62f))
+                                .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.58f))
                                 .padding(horizontal = 18.dp, vertical = 20.dp)
                         ) {
-                            Text(video.channelName.ifBlank { "Shorts" }, color = androidx.compose.ui.graphics.Color.White,
-                                fontWeight = FontWeight.SemiBold, maxLines = 1)
-                            Text(video.title, color = androidx.compose.ui.graphics.Color.White,
-                                fontSize = 16.sp, fontWeight = FontWeight.Medium,
-                                modifier = Modifier.padding(top = 6.dp), maxLines = 3)
-                            Text("Tap to play  •  Swipe up for next", color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.82f),
-                                fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
+                            Text(
+                                video.channelName.ifBlank { "Shorts" },
+                                color = androidx.compose.ui.graphics.Color.White,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                modifier = Modifier.clickable { onChannel(video.channelUrl) }
+                            )
+                            Text(
+                                video.title,
+                                color = androidx.compose.ui.graphics.Color.White,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.padding(top = 6.dp),
+                                maxLines = 3
+                            )
                         }
                     }
                 }
