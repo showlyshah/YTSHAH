@@ -9,6 +9,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.rememberCoroutineScope
+import com.viewtube.app.data.ChannelItem
+import com.viewtube.app.data.FeedMixer
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
@@ -61,24 +67,69 @@ fun MiniPlayer(onOpen: (String) -> Unit) {
 
 @Composable
 fun ShortsScreen(onSearch: () -> Unit, onAccount: () -> Unit, onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
+    val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
     var videos by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
+    var loadingMore by remember { mutableStateOf(false) }
+    var canLoadMore by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
+    val mixer = remember(reload) {
+        FeedMixer(
+            listOf("shorts", "popular shorts", "viral shorts", "music shorts", "gaming shorts", "funny shorts", "science shorts", "Malayalam shorts"),
+            Graph.repo,
+        ) { it.isShort }
+    }
+
     LaunchedEffect(reload) {
         loading = true
         error = null
-        runCatching { Graph.repo.trending() }
-            .onSuccess { all -> videos = all.filter { it.isShort } }
-            .onFailure { error = it.message ?: "Could not load Shorts." }
-        loading = false
+        loadingMore = false
+        videos = emptyList()
+        try {
+            videos = mixer.more(20)
+            canLoadMore = !mixer.exhausted && mixer.lastError == null
+            error = mixer.lastError?.message
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            error = failure.message ?: "Could not load Shorts."
+            canLoadMore = false
+        } finally {
+            loading = false
+        }
     }
+
+    LoadMoreEffect(listState, canLoadMore && !loadingMore) {
+        loadingMore = true
+        scope.launch {
+            try {
+                val page = mixer.more(12)
+                if (page.isNotEmpty()) videos = (videos + page).distinctBy { it.id }
+                canLoadMore = !mixer.exhausted && mixer.lastError == null
+                error = mixer.lastError?.message
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                error = failure.message ?: "Could not load more Shorts."
+                canLoadMore = false
+            } finally {
+                loadingMore = false
+            }
+        }
+    }
+
     Column(Modifier.fillMaxSize()) {
         TopBar(onSearch = onSearch, onAccount = onAccount)
         when {
-            loading -> Loading()
-            videos.isEmpty() -> Message("No Shorts available", error ?: "No Shorts were found in the current trending results.", "Try again") { reload++ }
-            else -> LazyColumn(Modifier.fillMaxSize()) { items(videos, key = { it.id }) { video -> VideoCard(video, { onVideo(video) }, onChannel) } }
+            loading && videos.isEmpty() -> Loading()
+            videos.isEmpty() -> Message("No Shorts available", error ?: "Try again in a moment.", "Try again") { reload++ }
+            else -> LazyColumn(Modifier.fillMaxSize(), state = listState) {
+                items(videos, key = { it.id }) { video -> VideoCard(video, { onVideo(video) }, onChannel) }
+                if (loadingMore) item { Loading() }
+                if (error != null) item { Text(error.orEmpty(), color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp)) }
+            }
         }
     }
 }
@@ -86,11 +137,37 @@ fun ShortsScreen(onSearch: () -> Unit, onAccount: () -> Unit, onChannel: (String
 @Composable
 fun CreatorsScreen(onSearch: () -> Unit, onAccount: () -> Unit, onChannel: (String) -> Unit) {
     val channels by Graph.store.subs.collectAsStateCompat()
+    var discovered by remember { mutableStateOf<List<ChannelItem>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        loading = true
+        val topics = listOf("popular YouTube creators", "technology channels", "science channels", "music channels")
+        val found = mutableListOf<ChannelItem>()
+        topics.forEach { topic ->
+            try {
+                found += Graph.repo.search(topic).items.filterIsInstance<ChannelItem>()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Keep results from other creator categories if one search fails.
+            }
+        }
+        discovered = found.distinctBy { it.id }.filterNot { channel -> channels.any { it.id == channel.id } }
+        loading = false
+    }
+
     Column(Modifier.fillMaxSize()) {
         TopBar(onSearch, onAccount)
-        Text("Your creators", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(16.dp))
-        if (channels.isEmpty()) Message("No creators yet", "Subscribe to channels while watching videos to see them here.")
-        else LazyColumn(Modifier.fillMaxSize()) { items(channels, key = { it.id }) { channel -> ChannelRow(channel) { onChannel(channel.url) } } }
+        LazyColumn(Modifier.fillMaxSize()) {
+            item { Text("Your creators", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(16.dp)) }
+            if (channels.isEmpty()) item { Message("No creators yet", "Subscribe to channels while watching videos to see them here.") }
+            else items(channels, key = { "sub-" + it.id }) { channel -> ChannelRow(channel) { onChannel(channel.url) } }
+            item { Text("Discover creators", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(16.dp)) }
+            if (loading) item { Loading() }
+            else if (discovered.isEmpty()) item { Message("No creators found", "Try searching for a creator or topic.") }
+            else items(discovered, key = { "discover-" + it.id }) { channel -> ChannelRow(channel) { onChannel(channel.url) } }
+        }
     }
 }
 
