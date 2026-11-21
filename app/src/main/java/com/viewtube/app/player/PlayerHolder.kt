@@ -66,6 +66,9 @@ object PlayerHolder {
     private val _audioBitrate = MutableStateFlow(0)
     val audioBitrate: StateFlow<Int> = _audioBitrate.asStateFlow()
 
+    private val _audioOnly = MutableStateFlow(false)
+    val audioOnly: StateFlow<Boolean> = _audioOnly.asStateFlow()
+
     private val _speed = MutableStateFlow(1f)
     val speed: StateFlow<Float> = _speed.asStateFlow()
 
@@ -203,10 +206,13 @@ object PlayerHolder {
         startMs: Long = 0,
         audioTrackId: String? = _audioTrack.value,
         audioBitrate: Int = _audioBitrate.value,
+        audioOnly: Boolean = _audioOnly.value,
         loop: Boolean = false,
     ) {
         looping = loop
         _audioBitrate.value = audioBitrate
+        val audioOnlyEnabled = audioOnly && !d.isLive
+        _audioOnly.value = audioOnlyEnabled
         player.repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
         _audioTrack.value = audioTrackId
         val same = _current.value?.video?.id == d.video.id
@@ -230,7 +236,9 @@ object PlayerHolder {
             val videoOnly = bestVideo(d.videoOnly, wantedHeight)
             val muxed = bestVideo(d.muxed, wantedHeight)
             val playableMuxed = d.muxed.filter { it.deliveryMethod != DeliveryMethod.TORRENT }
-            val chosen: MediaSource? = when {
+            val chosen: MediaSource? = if (audioOnlyEnabled) {
+                audio?.let { mediaSource(it, item) }
+            } else when {
                 videoOnly != null && audio != null ->
                     MergingMediaSource(mediaSource(videoOnly, item), mediaSource(audio, item))
                 muxed != null -> mediaSource(muxed, item)
@@ -241,7 +249,7 @@ object PlayerHolder {
             }
             requireNotNull(chosen) { "This video has no playable streams (it may be restricted)." }
             source = chosen
-            _height.value = if (videoOnly != null && audio != null) videoOnly.height
+            _height.value = if (audioOnlyEnabled) 0 else if (videoOnly != null && audio != null) videoOnly.height
             else muxed?.height ?: playableMuxed.maxOfOrNull { it.height } ?: 0
         }
 
@@ -274,6 +282,7 @@ object PlayerHolder {
         _height.value = 0
         _audioTrack.value = null
         _audioBitrate.value = 0
+        _audioOnly.value = false
         _skipNotice.value = null
         _playing.value = false
         segments = emptyList()
