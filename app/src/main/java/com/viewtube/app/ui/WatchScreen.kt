@@ -158,7 +158,10 @@ fun WatchScreen(
             }
         }
     }
-    androidx.activity.compose.BackHandler(enabled = fullscreen) { fullscreen = false }
+    androidx.activity.compose.BackHandler(enabled = fullscreen) {
+        manualFullscreen = false
+        dismissedAutoFullscreen = true
+    }
     // Hardware/system Back should minimise the watch screen into the persistent mini-player.
     androidx.activity.compose.BackHandler(enabled = !fullscreen) { onBack() }
 
