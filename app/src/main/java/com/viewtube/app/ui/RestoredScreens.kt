@@ -36,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.viewtube.app.data.Graph
+import com.viewtube.app.data.FeedDiagnostics
 import com.viewtube.app.data.Paged
 import com.viewtube.app.data.VideoItem
 import com.viewtube.app.player.PlayerHolder
@@ -79,6 +80,7 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
         error = null
         videos = emptyList()
         nextPage = null
+        val started = android.os.SystemClock.elapsedRealtime()
         runCatching {
             kotlinx.coroutines.withTimeout(30_000) {
                 Graph.repo.shorts(Graph.store.subs.value.map { it.url })
@@ -86,7 +88,14 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
         }.onSuccess { page ->
             videos = page.items.distinctBy { it.id }
             nextPage = page.next
-        }.onFailure { error = it.message ?: "Could not load Shorts. Check your connection and retry." }
+            FeedDiagnostics.record("shorts", "initial-feed", if (videos.isEmpty()) "empty" else "success",
+                android.os.SystemClock.elapsedRealtime() - started, videos.size,
+                detail = "hasContinuation=${page.next != null}")
+        }.onFailure {
+            FeedDiagnostics.record("shorts", "initial-feed", "failure",
+                android.os.SystemClock.elapsedRealtime() - started, error = it)
+            error = it.message ?: "Could not load Shorts. Check your connection and retry."
+        }
         loading = false
     }
 
@@ -95,13 +104,21 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
         if (loadingMore) return
         scope.launch {
             loadingMore = true
+            val started = android.os.SystemClock.elapsedRealtime()
             runCatching { fetch() }
                 .onSuccess { page ->
                     videos = (videos + page.items).distinctBy { it.id }
                     nextPage = page.next
+                    FeedDiagnostics.record("shorts", "next-page", if (page.items.isEmpty()) "empty" else "success",
+                        android.os.SystemClock.elapsedRealtime() - started, page.items.size,
+                        detail = "total=${videos.size}, hasContinuation=${page.next != null}")
                     error = null
                 }
-                .onFailure { error = it.message ?: "Could not load more Shorts." }
+                .onFailure {
+                    FeedDiagnostics.record("shorts", "next-page", "failure",
+                        android.os.SystemClock.elapsedRealtime() - started, error = it)
+                    error = it.message ?: "Could not load more Shorts."
+                }
             loadingMore = false
         }
     }
