@@ -92,7 +92,7 @@ fun TopBar(onSearch: () -> Unit, onAccount: () -> Unit) {
 private val CATEGORIES = listOf("All", "Music", "Gaming", "Live", "News", "Podcasts", "Movies", "Sports", "Cooking", "Learning", "Comedy")
 
 private fun topicsFor(category: String, area: String? = null): List<String> {
-    if (category != "All") return listOf(category, "$category new", "$category popular", "best $category")
+    if (category != "All") return listOf(category, "$category new", "$category popular", "best $category") + area?.let { listOf("$category $it", "$category events $it") }.orEmpty()
     val store = Graph.store
     val personal = (store.subs.value.shuffled().take(5).map { it.name } +
         store.history.value.take(8).map { it.channelName }.distinct().take(4) +
