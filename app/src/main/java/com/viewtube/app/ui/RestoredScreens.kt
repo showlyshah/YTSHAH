@@ -77,9 +77,9 @@ fun ShortsScreen(onSearch: () -> Unit, onAccount: () -> Unit, onChannel: (String
     var reload by remember { mutableIntStateOf(0) }
     val mixer = remember(reload) {
         FeedMixer(
-            listOf("shorts", "popular shorts", "viral shorts", "music shorts", "gaming shorts", "funny shorts", "science shorts", "Malayalam shorts"),
+            listOf("#shorts", "YouTube Shorts", "trending Shorts", "viral Shorts", "music Shorts", "gaming Shorts", "funny Shorts", "science Shorts", "Malayalam Shorts"),
             Graph.repo,
-        ) { it.isShort || it.durationSec in 1L..180L }
+        ) { it.isShort }
     }
 
     LaunchedEffect(reload) {
