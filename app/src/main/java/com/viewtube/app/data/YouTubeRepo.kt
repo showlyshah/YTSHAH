@@ -44,8 +44,11 @@ const val FILTER_CHANNELS = "channels"
 
 class YouTubeRepo(private val http: OkHttpClient) {
     private val yt = ServiceList.YouTube
+    private val extractorGate = Semaphore(3)
 
-    private suspend fun <T> io(block: () -> T): T = withContext(Dispatchers.IO) { block() }
+    private suspend fun <T> io(block: () -> T): T = withContext(Dispatchers.IO) {
+        extractorGate.withPermit { block() }
+    }
 
     // ---------------------------------------------------------------- search
 
