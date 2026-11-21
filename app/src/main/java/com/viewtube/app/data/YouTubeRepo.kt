@@ -87,7 +87,13 @@ class YouTubeRepo(private val http: OkHttpClient) {
         // Match the unfiltered query path used by the Search screen; filter to video items locally.
         listOf("popular", "trending", "viral videos").map { query ->
             async(Dispatchers.IO) {
-                runCatching { search(query).items.filterIsInstance<VideoItem>() }.getOrDefault(emptyList())
+                val started = android.os.SystemClock.elapsedRealtime()
+                val result = runCatching { search(query).items.filterIsInstance<VideoItem>() }
+                result.onSuccess { FeedDiagnostics.record("home", "trending:$query", if (it.isEmpty()) "empty" else "success",
+                    android.os.SystemClock.elapsedRealtime() - started, it.size) }
+                    .onFailure { FeedDiagnostics.record("home", "trending:$query", "failure",
+                        android.os.SystemClock.elapsedRealtime() - started, error = it) }
+                result.getOrDefault(emptyList())
             }
         }.awaitAll().flatten().distinctBy { it.id }
     }
