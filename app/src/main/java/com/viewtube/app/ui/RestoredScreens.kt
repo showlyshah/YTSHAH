@@ -40,6 +40,7 @@ import com.viewtube.app.data.FeedDiagnostics
 import com.viewtube.app.data.Paged
 import com.viewtube.app.data.VideoItem
 import com.viewtube.app.player.PlayerHolder
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @Composable
@@ -92,6 +93,7 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
                 android.os.SystemClock.elapsedRealtime() - started, videos.size,
                 detail = "hasContinuation=${page.next != null}")
         }.onFailure {
+            if (it is CancellationException) throw it
             FeedDiagnostics.record("shorts", "initial-feed", "failure",
                 android.os.SystemClock.elapsedRealtime() - started, error = it)
             error = it.message ?: "Could not load Shorts. Check your connection and retry."
@@ -115,6 +117,7 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
                     error = null
                 }
                 .onFailure {
+                    if (it is CancellationException) throw it
                     FeedDiagnostics.record("shorts", "next-page", "failure",
                         android.os.SystemClock.elapsedRealtime() - started, error = it)
                     error = it.message ?: "Could not load more Shorts."
