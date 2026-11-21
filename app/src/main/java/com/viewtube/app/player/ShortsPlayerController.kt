@@ -4,9 +4,12 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import coil.imageLoader
+import coil.request.ImageRequest
 import com.viewtube.app.data.Graph
 import com.viewtube.app.data.RuntimeDiagnostics
 import com.viewtube.app.data.VideoItem
+import com.viewtube.app.data.VideoDetails
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,6 +36,8 @@ class ShortsPlayerController private constructor() {
 
     private val slots = List(SLOT_COUNT) { Slot(PlayerHolder.createShortsPlayer()) }
     private var focusedSlot = -1
+    // Small LRU of extracted stream metadata; keeps the next swipe from repeating extraction.
+    private val detailsCache = LinkedHashMap<String, VideoDetails>(5, 0.75f, true)
     private val _loading = MutableStateFlow<Set<Int>>(emptySet())
     val loading: StateFlow<Set<Int>> = _loading.asStateFlow()
     private val _failed = MutableStateFlow<Set<String>>(emptySet())
@@ -80,9 +85,22 @@ class ShortsPlayerController private constructor() {
             slot.player.playWhenReady = index == activeSlot && slot.videoId == videos[page].id
         }
         _playing.value = slots[activeSlot].player.isPlaying
-        // Resolve the next stream details one page further ahead while the adjacent player buffers.
+        // Warm metadata and thumbnails a little ahead, without keeping an unbounded queue in RAM.
         videos.getOrNull(page + 2)?.let { next ->
-            scope.launch(Dispatchers.IO) { runCatching { Graph.repo.details(next.id) } }
+            scope.launch(Dispatchers.IO) {
+                runCatching {
+                    val details = Graph.repo.details(next.id)
+                    synchronized(detailsCache) {
+                        detailsCache[next.id] = details
+                        while (detailsCache.size > 5) detailsCache.remove(detailsCache.keys.first())
+                    }
+                }
+            }
+        }
+        videos.drop(page + 1).take(3).mapNotNull { it.thumbnail }.distinct().forEach { url ->
+            Graph.appContext.imageLoader.enqueue(
+                ImageRequest.Builder(Graph.appContext).data(url).size(480).build()
+            )
         }
     }
 
@@ -99,7 +117,13 @@ class ShortsPlayerController private constructor() {
         _loading.value = _loading.value + index
         slot.job = scope.launch {
             try {
-                val details = withContext(Dispatchers.IO) { Graph.repo.details(video.id) }
+                val details = synchronized(detailsCache) { detailsCache[video.id] }
+                    ?: withContext(Dispatchers.IO) { Graph.repo.details(video.id) }.also { fetched ->
+                        synchronized(detailsCache) {
+                            detailsCache[video.id] = fetched
+                            while (detailsCache.size > 5) detailsCache.remove(detailsCache.keys.first())
+                        }
+                    }
                 val source = PlayerHolder.shortsMediaSource(details)
                 slot.player.setMediaSource(source)
                 slot.player.prepare()
@@ -131,6 +155,7 @@ class ShortsPlayerController private constructor() {
             slot.videoId = null
         }
         _loading.value = emptySet()
+        synchronized(detailsCache) { detailsCache.clear() }
         focusedSlot = -1
         _playing.value = false
     }
