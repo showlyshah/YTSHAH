@@ -67,7 +67,43 @@ object PlayerHolder {
         }.getOrDefault(C.AUDIO_SESSION_ID_UNSET)
     }
     val audioSessionId: Int get() = generatedAudioSessionId
+    private var equalizerEffect: android.media.audiofx.Equalizer? = null
     val player: ExoPlayer by lazy { buildPlayer() }
+
+    /** One persistent effect per ExoPlayer audio session; opening the EQ UI never recreates it. */
+    private fun ensureEqualizer() {
+        if (equalizerEffect != null) return
+        val session = audioSessionId
+        if (session <= 0) return
+        equalizerEffect = runCatching {
+            android.media.audiofx.Equalizer(0, session).apply { enabled = false }
+        }.onFailure { Graph.diagnostics.record("equalizer_init", it) }.getOrNull()
+    }
+
+    fun getEqualizer(): android.media.audiofx.Equalizer? {
+        ensureEqualizer()
+        return equalizerEffect
+    }
+
+    fun setEqualizerEnabled(enabled: Boolean): Boolean {
+        val effect = getEqualizer() ?: return false
+        return runCatching { effect.enabled = enabled; effect.enabled }
+            .onFailure { Graph.diagnostics.record("equalizer_toggle", it) }.getOrDefault(false)
+    }
+
+    fun setEqualizerBand(band: Int, levelMillibels: Int): Boolean {
+        val effect = getEqualizer() ?: return false
+        return runCatching {
+            effect.setBandLevel(band.toShort(), levelMillibels.coerceIn(effect.bandLevelRange[0].toInt(), effect.bandLevelRange[1].toInt()).toShort())
+            true
+        }.onFailure { Graph.diagnostics.record("equalizer_band", it) }.getOrDefault(false)
+    }
+
+    fun applyEqualizerPreset(preset: Int): Boolean {
+        val effect = getEqualizer() ?: return false
+        return runCatching { effect.usePreset(preset.toShort()); true }
+            .onFailure { Graph.diagnostics.record("equalizer_preset", it) }.getOrDefault(false)
+    }
 
     private val _current = MutableStateFlow<VideoDetails?>(null)
     val current: StateFlow<VideoDetails?> = _current.asStateFlow()
@@ -137,23 +173,34 @@ object PlayerHolder {
         return p
     }
 
+    /** Uses the user's queued item first, then the current video's recommendations. */
+    fun playNext(onAdvanced: (String) -> Unit) {
+        val current = _current.value ?: return
+        advanceToNext(current, onAdvanced, "manual_next")
+    }
+
+    private fun advanceToNext(d: VideoDetails, onAdvanced: ((String) -> Unit)?, tag: String) {
+        val queued = Graph.store.queue.value.firstOrNull { it.id != d.video.id }
+        val recommendation = d.related.firstOrNull { it.id != d.video.id && !Graph.store.isWatched(it.id) }
+            ?: d.related.firstOrNull { it.id != d.video.id }
+        val nextId = queued?.id ?: recommendation?.id ?: return
+        scope.launch {
+            runCatching {
+                val nextDetails = Graph.repo.details(nextId)
+                if (queued != null) Graph.store.removeFromQueue(nextId)
+                Graph.store.addHistory(nextDetails.video)
+                play(nextDetails)
+                if (onAdvanced == null) _advanced.emit(nextId) else onAdvanced(nextId)
+            }.onFailure { Graph.diagnostics.record(tag, it) }
+        }
+    }
+
     private fun onEnded() {
         val d = _current.value ?: return
         if (loopRepeatEnabled || d.isLive || _repeatMode.value == "one") return
         if (_repeatMode.value == "off" || !Graph.store.autoplayNext.value) return
         // A user-curated queue always takes precedence over automatic related videos.
-        val next = Graph.store.dequeueNext()
-            ?: d.related.firstOrNull { !Graph.store.isWatched(it.id) }
-            ?: d.related.firstOrNull()
-            ?: return
-        scope.launch {
-            runCatching {
-                val nd = Graph.repo.details(next.id)
-                Graph.store.addHistory(nd.video)
-                play(nd)
-                _advanced.emit(next.id)
-            }.onFailure { Graph.diagnostics.record("autoplay", it) }
-        }
+        advanceToNext(d, null, "autoplay")
     }
 
     private fun sourceFactory(): DataSource.Factory {
@@ -285,6 +332,8 @@ object PlayerHolder {
 
         _current.value = d
         player.setMediaSource(source)
+        // Initialise the Android audio effect before the new track starts, not when the EQ sheet opens.
+        ensureEqualizer()
         player.prepare()
         if (resumeAt > 0) player.seekTo(resumeAt)
         player.setPlaybackSpeed(_speed.value)
