@@ -48,7 +48,7 @@ dependencies {
 
     // YouTube data without Google's player or ads (same library NewPipe uses).
     // YouTube changes often: if videos stop loading, bump this to the newest tag.
-    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.5")
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.27.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     implementation("androidx.core:core-ktx:1.15.0")
