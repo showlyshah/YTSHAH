@@ -177,17 +177,37 @@ fun YouScreen(onVideo: (VideoItem) -> Unit, onHistory: () -> Unit, onWatchLater:
     val history by Graph.store.history.collectAsStateCompat()
     val later by Graph.store.later.collectAsStateCompat()
     val subs by Graph.store.subs.collectAsStateCompat()
-    Column(Modifier.fillMaxSize()) {
-        Text("You", fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(20.dp))
-        Text(name.ifBlank { "Your ViewTube" }, fontSize = 18.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(horizontal = 20.dp))
-        Text("${subs.size} subscriptions  •  ${history.size} watched  •  ${later.size} saved", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, modifier = Modifier.padding(start = 20.dp, top = 4.dp, bottom = 16.dp))
-        HubAction("History", history.size.toString(), Icons.Default.History, onHistory)
-        HubAction("Watch later", later.size.toString(), Icons.Default.VideoLibrary, onWatchLater)
-        HubAction("Subscriptions", subs.size.toString(), Icons.Default.Subscriptions, onSubscriptions)
-        HubAction("Settings & account", null, Icons.Default.Settings, onSettings)
+
+    LazyColumn(Modifier.fillMaxSize()) {
+        item {
+            Text("You", fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 20.dp, top = 20.dp, bottom = 12.dp))
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Avatar(null, 56)
+                Column(Modifier.padding(start = 14.dp)) {
+                    Text(name.ifBlank { "Your ViewTube profile" }, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Manage your viewing activity and library", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                }
+            }
+            Text(
+                "${subs.size} subscriptions  •  ${history.size} watched  •  ${later.size} saved",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+            )
+        }
+        item { Text("History & activity", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 4.dp)) }
+        item { HubAction("History", history.size.toString(), Icons.Default.History, onHistory) }
+        item { HubAction("Subscriptions", subs.size.toString(), Icons.Default.Subscriptions, onSubscriptions) }
+        item { Text("Your library", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 4.dp)) }
+        item { HubAction("Watch later", later.size.toString(), Icons.Default.VideoLibrary, onWatchLater) }
+        item { Text("Account & app", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 4.dp)) }
+        item { HubAction("Settings & account", null, Icons.Default.Settings, onSettings) }
         if (history.isNotEmpty()) {
-            Text("Recently watched", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(16.dp))
-            history.take(5).forEach { video -> VideoRow(video) { onVideo(video) } }
+            item { Text("Recently watched", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(16.dp)) }
+            items(history.take(8), key = { "recent-" + it.id }) { video -> VideoRow(video) { onVideo(video) } }
         }
     }
 }
