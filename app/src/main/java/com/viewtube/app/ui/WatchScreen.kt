@@ -82,6 +82,7 @@ import com.viewtube.app.data.OnDeviceSubtitleTranslator
 import com.viewtube.app.data.errorText
 import com.viewtube.app.data.watchUrl
 import com.viewtube.app.player.PlayerHolder
+import com.viewtube.app.player.PegelEqualizer
 import kotlinx.coroutines.launch
 
 private fun Context.activity(): Activity? {
@@ -132,7 +133,7 @@ fun WatchScreen(
     var translationEnabled by remember { mutableStateOf(false) }
     var captionsEnabled by remember { mutableStateOf(true) }
     var showEqualizer by remember { mutableStateOf(false) }
-    var equalizer by remember { mutableStateOf<android.media.audiofx.Equalizer?>(null) }
+    var equalizer by remember { mutableStateOf<PegelEqualizer?>(null) }
     var eqLevels by remember { mutableStateOf<List<Int>>(emptyList()) }
     var equalizerActive by remember { mutableStateOf(false) }
     var selectedSubtitleTrack by remember { mutableStateOf<SubtitleTrack?>(null) }
