@@ -110,7 +110,7 @@ class MainActivity : ComponentActivity() {
     // Swiping home while a video is open shrinks it into a floating window.
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (onWatchScreen && PlayerHolder.player.isPlaying && Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        if (onWatchScreen && PlayerHolder.player.isPlaying && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             runCatching {
                 val decor = window.decorView
                 val params = PictureInPictureParams.Builder()
@@ -159,7 +159,7 @@ class MainActivity : ComponentActivity() {
             containerColor = androidx.compose.material3.MaterialTheme.colorScheme.background,
             bottomBar = {
                 Column {
-                    if (!route.startsWith("watch/") && route != "shorts") MiniPlayer { id -> nav.navigate("watch/$id") }
+                    if (!route.startsWith("watch/")) MiniPlayer { id -> nav.navigate("watch/$id") }
                     if (showBar) NavigationBar(containerColor = androidx.compose.material3.MaterialTheme.colorScheme.background) {
                         tabs.forEach { (r, label, icon) ->
                             NavigationBarItem(
@@ -239,7 +239,7 @@ class MainActivity : ComponentActivity() {
                     composable("watch/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) {
                         WatchScreen(
                             videoId = it.arguments?.getString("id").orEmpty(),
-                            onBack = { nav.popBackStack() },
+                            onBack = { if (!nav.popBackStack()) nav.navigate("home") { launchSingleTop = true } },
                             onVideo = { id -> nav.navigate("watch/$id") { popUpTo(it.destination.id) { inclusive = true } } },
                             onChannel = { u -> nav.openChannel(u) },
                         )
