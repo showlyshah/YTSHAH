@@ -1,6 +1,8 @@
 package com.viewtube.app.player
 
 import android.app.NotificationChannel
+import android.app.PendingIntent
+import android.content.ComponentName
 import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -8,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
@@ -26,6 +29,38 @@ class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
 
     private val stopCommand = SessionCommand(ACTION_STOP, Bundle.EMPTY)
+    private val previousCommand = SessionCommand(ACTION_PREVIOUS, Bundle.EMPTY)
+    private val nextCommand = SessionCommand(ACTION_NEXT, Bundle.EMPTY)
+
+    private fun activityPendingIntent(): PendingIntent {
+        val launch = Intent().setComponent(ComponentName(this, com.viewtube.app.MainActivity::class.java))
+            .setAction(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_LAUNCHER)
+            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        return PendingIntent.getActivity(
+            this, 1002, launch,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    @Suppress("DEPRECATION")
+    private val previousButton: CommandButton by lazy {
+        CommandButton.Builder().setDisplayName("Previous")
+            .setIconResId(android.R.drawable.ic_media_previous)
+            .setSessionCommand(previousCommand).build()
+    }
+    @Suppress("DEPRECATION")
+    private val nextButton: CommandButton by lazy {
+        CommandButton.Builder().setDisplayName("Next")
+            .setIconResId(android.R.drawable.ic_media_next)
+            .setSessionCommand(nextCommand).build()
+    }
+    @Suppress("DEPRECATION")
+    private val playPauseButton: CommandButton by lazy {
+        CommandButton.Builder().setDisplayName("Play or pause")
+            .setIconResId(android.R.drawable.ic_media_play)
+            .setPlayerCommand(Player.COMMAND_PLAY_PAUSE).build()
+    }
 
     @Suppress("DEPRECATION")
     private val stopButton: CommandButton by lazy {
@@ -43,16 +78,16 @@ class PlaybackService : MediaSessionService() {
         // notification so this placeholder is replaced rather than duplicated.
         promoteToForeground()
         session = MediaSession.Builder(this, PlayerHolder.player)
-            .setCallback(object : MediaSession.Callback {
+            .setSessionActivity(activityPendingIntent())\n            .setCallback(object : MediaSession.Callback {
                 override fun onConnect(
                     session: MediaSession,
                     controller: MediaSession.ControllerInfo,
                 ): MediaSession.ConnectionResult {
                     val commands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
-                        .buildUpon().add(stopCommand).build()
+                        .buildUpon().add(stopCommand).add(previousCommand).add(nextCommand).build()
                     return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                         .setAvailableSessionCommands(commands)
-                        .setCustomLayout(ImmutableList.of(stopButton))
+                        .setCustomLayout(ImmutableList.of(previousButton, playPauseButton, nextButton, stopButton))
                         .build()
                 }
 
@@ -70,7 +105,7 @@ class PlaybackService : MediaSessionService() {
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
             })
-            .setCustomLayout(ImmutableList.of(stopButton))
+            .setSessionActivity(activityPendingIntent())\n            .setCustomLayout(ImmutableList.of(previousButton, playPauseButton, nextButton, stopButton))
             .build()
     }
 
@@ -141,7 +176,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     private companion object {
-        const val ACTION_STOP = "viewtube.STOP"
+        const val ACTION_STOP = "viewtube.STOP"\n        const val ACTION_PREVIOUS = "viewtube.PREVIOUS"\n        const val ACTION_NEXT = "viewtube.NEXT"
         const val CHANNEL_ID = "viewtube_playback"
         // Media3's default media notification ID; reuse it so its media controls replace
         // this startup notification instead of leaving a second persistent notification.
