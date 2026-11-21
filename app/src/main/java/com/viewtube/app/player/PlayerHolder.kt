@@ -253,6 +253,53 @@ object PlayerHolder {
         return DefaultMediaSourceFactory(sourceFactory()).createMediaSource(builder.build())
     }
 
+    /**
+     * Creates an isolated player for the vertical Shorts feed. It deliberately does not share
+     * the app's foreground playback session or mini-player state.
+     */
+    fun createShortsPlayer(): ExoPlayer = ExoPlayer.Builder(appContext)
+        .setMediaSourceFactory(DefaultMediaSourceFactory(sourceFactory()))
+        .setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA)
+                .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                .build(),
+            true
+        )
+        .setHandleAudioBecomingNoisy(true)
+        .build()
+        .apply { repeatMode = Player.REPEAT_MODE_ONE }
+
+    /** Resolve a Shorts media source using ViewTube's normal quality and audio selection rules. */
+    fun shortsMediaSource(d: VideoDetails): MediaSource {
+        val metadata = MediaMetadata.Builder()
+            .setTitle(d.video.title)
+            .setArtist(d.channel.name)
+            .setArtworkUri(d.video.thumbnail?.let { android.net.Uri.parse(it) })
+            .build()
+        val item = MediaItem.Builder()
+            .setMediaId(d.video.id)
+            .setMediaMetadata(metadata)
+            .build()
+        if (d.isLive && d.hlsUrl != null) {
+            return HlsMediaSource.Factory(sourceFactory())
+                .createMediaSource(item.buildUpon().setUri(d.hlsUrl).build())
+        }
+        val audio = bestAudio(d.audio, null)
+        val wantedHeight = defaultHeight(d)
+        val videoOnly = bestVideo(d.videoOnly, wantedHeight)
+        val muxed = bestVideo(d.muxed, wantedHeight)
+        val chosen: MediaSource? = when {
+            videoOnly != null && audio != null ->
+                MergingMediaSource(mediaSource(videoOnly, item), mediaSource(audio, item))
+            muxed != null -> mediaSource(muxed, item)
+            d.muxed.isNotEmpty() -> mediaSource(d.muxed.maxBy { it.height }, item)
+            audio != null -> mediaSource(audio, item)
+            else -> null
+        }
+        return requireNotNull(chosen) { "This Short has no playable streams." }
+    }
+
     // -------------------------------------------------------------------- play
 
     private var loopRepeatEnabled = false
