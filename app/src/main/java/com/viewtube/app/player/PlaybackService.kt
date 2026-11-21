@@ -78,7 +78,8 @@ class PlaybackService : MediaSessionService() {
         // notification so this placeholder is replaced rather than duplicated.
         promoteToForeground()
         session = MediaSession.Builder(this, PlayerHolder.player)
-            .setSessionActivity(activityPendingIntent())\n            .setCallback(object : MediaSession.Callback {
+            .setSessionActivity(activityPendingIntent())
+            .setCallback(object : MediaSession.Callback {
                 override fun onConnect(
                     session: MediaSession,
                     controller: MediaSession.ControllerInfo,
@@ -97,15 +98,19 @@ class PlaybackService : MediaSessionService() {
                     customCommand: SessionCommand,
                     args: Bundle,
                 ): ListenableFuture<SessionResult> {
-                    if (customCommand.customAction == ACTION_STOP) {
-                        PlayerHolder.stop()
-                        stopForeground(STOP_FOREGROUND_REMOVE)
-                        stopSelf()
+                    when (customCommand.customAction) {
+                        ACTION_PREVIOUS -> PlayerHolder.playPrevious()
+                        ACTION_NEXT -> PlayerHolder.playNext { }
+                        ACTION_STOP -> {
+                            PlayerHolder.stop()
+                            stopForeground(STOP_FOREGROUND_REMOVE)
+                            stopSelf()
+                        }
                     }
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
             })
-            .setSessionActivity(activityPendingIntent())\n            .setCustomLayout(ImmutableList.of(previousButton, playPauseButton, nextButton, stopButton))
+            .setCustomLayout(ImmutableList.of(previousButton, playPauseButton, nextButton, stopButton))
             .build()
     }
 
@@ -176,7 +181,9 @@ class PlaybackService : MediaSessionService() {
     }
 
     private companion object {
-        const val ACTION_STOP = "viewtube.STOP"\n        const val ACTION_PREVIOUS = "viewtube.PREVIOUS"\n        const val ACTION_NEXT = "viewtube.NEXT"
+        const val ACTION_STOP = "viewtube.STOP"
+        const val ACTION_PREVIOUS = "viewtube.PREVIOUS"
+        const val ACTION_NEXT = "viewtube.NEXT"
         const val CHANNEL_ID = "viewtube_playback"
         // Media3's default media notification ID; reuse it so its media controls replace
         // this startup notification instead of leaving a second persistent notification.
