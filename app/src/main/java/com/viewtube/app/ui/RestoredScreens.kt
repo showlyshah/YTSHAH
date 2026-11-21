@@ -1,5 +1,56 @@
 package com.viewtube.app.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.Subscriptions
+import androidx.compose.material.icons.filled.VideoLibrary
+import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
+import com.viewtube.app.data.FeedDiagnostics
+import com.viewtube.app.data.Graph
+import com.viewtube.app.data.Paged
+import com.viewtube.app.data.RuntimeDiagnostics
+import com.viewtube.app.data.VideoItem
+import com.viewtube.app.player.PlayerHolder
+import com.viewtube.app.player.ShortsPlayerController
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
@@ -74,23 +125,23 @@ fun MiniPlayer(onOpen: (String) -> Unit) {
 }
 
 @OptIn(UnstableApi::class)
+@Suppress("UNUSED_PARAMETER")
+@androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
-    DisposableEffect(Unit) {
-        RuntimeDiagnostics.record("SHORTS_UI", "screen-enter", "ok")
-        onDispose { RuntimeDiagnostics.record("SHORTS_UI", "screen-dispose", "ok") }
-    }
+    val scope = rememberCoroutineScope()
+    val shortsPlayer = remember { ShortsPlayerController.get() }
+    val loadingSlots by shortsPlayer.loading.collectAsStateCompat()
+    val failed by shortsPlayer.failed.collectAsStateCompat()
     var videos by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
     var nextPage by remember { mutableStateOf<(suspend () -> Paged<VideoItem>)?>(null) }
     var loading by remember { mutableStateOf(true) }
     var loadingMore by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableStateOf(0) }
-    val scope = rememberCoroutineScope()
     val pagerState = androidx.compose.foundation.pager.rememberPagerState(pageCount = { videos.size })
 
     LaunchedEffect(reload) {
-        RuntimeDiagnostics.record("SHORTS_UI", "initial-load", "started", "reload=$reload subscriptions=${Graph.store.subs.value.size}")
         loading = true
         error = null
         videos = emptyList()
@@ -103,47 +154,35 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
         }.onSuccess { page ->
             videos = page.items.distinctBy { it.id }
             nextPage = page.next
-            RuntimeDiagnostics.record("SHORTS_UI", "initial-load-results", if (videos.isEmpty()) "empty" else "success", "videos=${videos.size}, hasContinuation=${page.next != null}")
             FeedDiagnostics.record("shorts", "initial-feed", if (videos.isEmpty()) "empty" else "success",
                 android.os.SystemClock.elapsedRealtime() - started, videos.size,
-                detail = "verticalPager=true, inlinePlayer=true, hasContinuation=${page.next != null}")
+                detail = "source=channel-shorts-tabs, three-slot-player=true, continuation=${page.next != null}")
+            if (videos.isEmpty()) error = "No Shorts were found in the available channel Shorts tabs."
         }.onFailure {
             if (it is CancellationException) throw it
+            error = it.message ?: "Could not load Shorts. Check your connection and retry."
             FeedDiagnostics.record("shorts", "initial-feed", "failure",
                 android.os.SystemClock.elapsedRealtime() - started, error = it)
-            RuntimeDiagnostics.record("SHORTS_UI", "initial-load", "failure", error = it)
-            error = it.message ?: "Could not load Shorts. Check your connection and retry."
         }
         loading = false
-        RuntimeDiagnostics.record("SHORTS_UI", "initial-load-finished", if (videos.isEmpty()) "empty" else "success", "videos=${videos.size}, errorPresent=${error != null}")
     }
 
     fun loadMore() {
-        val fetch = nextPage ?: return
+        val continuation = nextPage ?: return
         if (loadingMore) return
+        loadingMore = true
         scope.launch {
-            RuntimeDiagnostics.record("SHORTS_UI", "pagination-request", "started", "currentVideos=${videos.size}")
-            loadingMore = true
-            val started = android.os.SystemClock.elapsedRealtime()
-            runCatching { fetch() }
+            runCatching { continuation() }
                 .onSuccess { page ->
-                    val before = videos.size
-                    videos = (videos + page.items).distinctBy { it.id }
+                    val known = videos.mapTo(HashSet()) { it.id }
+                    videos = videos + page.items.filter { known.add(it.id) }
                     nextPage = page.next
-                    RuntimeDiagnostics.record("SHORTS_UI", "pagination-results", if (page.items.isEmpty()) "empty" else "success", "newItems=${videos.size - before}, total=${videos.size}, hasContinuation=${page.next != null}")
-                    FeedDiagnostics.record("shorts", "next-page", if (page.items.isEmpty()) "empty" else "success",
-                        android.os.SystemClock.elapsedRealtime() - started, page.items.size,
-                        detail = "total=${videos.size}, hasContinuation=${page.next != null}")
-                    error = null
                 }
                 .onFailure {
                     if (it is CancellationException) throw it
-                    FeedDiagnostics.record("shorts", "next-page", "failure",
-                        android.os.SystemClock.elapsedRealtime() - started, error = it)
                     error = it.message ?: "Could not load more Shorts."
                 }
             loadingMore = false
-            RuntimeDiagnostics.record("SHORTS_UI", "pagination-finished", if (error == null) "complete" else "failure", "totalVideos=${videos.size}")
         }
     }
 
@@ -151,12 +190,20 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
         if (videos.isNotEmpty() && pagerState.currentPage >= videos.size - 3) loadMore()
     }
 
+    LaunchedEffect(pagerState.currentPage, videos) {
+        if (videos.isNotEmpty()) shortsPlayer.focus(pagerState.currentPage, videos)
+    }
+
+    DisposableEffect(shortsPlayer) {
+        onDispose { shortsPlayer.stop() }
+    }
+
     Column(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black)) {
         when {
             loading && videos.isEmpty() -> Loading()
             videos.isEmpty() -> Message(
-                if (error != null) "Couldn't load Shorts" else "No Shorts found",
-                error ?: "The source did not return any videos identified as Shorts.",
+                "Couldn't load Shorts",
+                error ?: "Subscribe to channels with Shorts or try again.",
                 "Try again"
             ) { reload++ }
             else -> androidx.compose.foundation.layout.Box(
@@ -170,39 +217,38 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
                     val video = videos[page]
                     androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
                         if (page == pagerState.currentPage) {
-                            LaunchedEffect(video.id) {
-                                RuntimeDiagnostics.record("SHORTS_UI", "inline-play-request", "started", "videoId=${video.id}")
-                                runCatching { Graph.repo.details(video.id) }
-                                    .onSuccess { details ->
-                                        Graph.store.addHistory(details.video)
-                                        runCatching { PlayerHolder.play(details) }
-                                            .onSuccess {
-                                                RuntimeDiagnostics.record("SHORTS_UI", "inline-play", "success", "videoId=${video.id}")
-                                            }
-                                            .onFailure {
-                                                error = it.message ?: "This Short could not be played."
-                                                RuntimeDiagnostics.record("SHORTS_UI", "inline-play", "failure", "videoId=${video.id}", it)
-                                            }
-                                    }
-                                    .onFailure {
-                                        error = it.message ?: "Could not load this Short."
-                                        RuntimeDiagnostics.record("SHORTS_UI", "inline-details", "failure", "videoId=${video.id}", it)
-                                    }
-                            }
                             AndroidView(
                                 factory = { context ->
                                     PlayerView(context).apply {
-                                        player = PlayerHolder.player
+                                        player = shortsPlayer.playerFor(page)
                                         resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                                        useController = true
+                                        useController = false
                                         setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
                                     }
                                 },
                                 update = { view ->
-                                    if (view.player !== PlayerHolder.player) view.player = PlayerHolder.player
+                                    if (view.player !== shortsPlayer.playerFor(page)) {
+                                        view.player = shortsPlayer.playerFor(page)
+                                    }
                                 },
-                                modifier = Modifier.fillMaxSize()
+                                modifier = Modifier.fillMaxSize().clickable {
+                                    shortsPlayer.togglePlayPause(page)
+                                }
                             )
+                            if (loadingSlots.contains(page.mod(3))) {
+                                Text(
+                                    "Loading Short…",
+                                    color = androidx.compose.ui.graphics.Color.White,
+                                    modifier = Modifier.align(Alignment.Center)
+                                )
+                            }
+                            if (video.id in failed) {
+                                Text(
+                                    "This Short couldn't be played. Swipe for the next one.",
+                                    color = androidx.compose.ui.graphics.Color.White,
+                                    modifier = Modifier.align(Alignment.Center).padding(24.dp)
+                                )
+                            }
                         } else {
                             coil.compose.AsyncImage(
                                 model = video.thumbnail,
@@ -221,7 +267,9 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
                                 color = androidx.compose.ui.graphics.Color.White,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
-                                modifier = Modifier.clickable(enabled = !video.channelUrl.isNullOrBlank()) { video.channelUrl?.let(onChannel) }
+                                modifier = Modifier.clickable(enabled = !video.channelUrl.isNullOrBlank()) {
+                                    video.channelUrl?.let(onChannel)
+                                }
                             )
                             Text(
                                 video.title,
@@ -238,8 +286,8 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
                     Text("Loading more Shorts…", color = androidx.compose.ui.graphics.Color.White,
                         modifier = Modifier.align(Alignment.TopCenter).padding(12.dp))
                 }
-                error?.let {
-                    Text(it, color = androidx.compose.ui.graphics.Color.White,
+                if (error != null && videos.isNotEmpty()) {
+                    Text(error!!, color = androidx.compose.ui.graphics.Color.White,
                         modifier = Modifier.align(Alignment.TopCenter).padding(12.dp))
                 }
             }
