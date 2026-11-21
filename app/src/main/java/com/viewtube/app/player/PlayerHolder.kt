@@ -49,6 +49,8 @@ import org.schabi.newpipe.extractor.stream.VideoStream
  * One player for the whole app. The UI shows it, and [PlaybackService] puts it in a media
  * notification so audio keeps playing when the screen is off or the app is in the background.
  */
+data class SubtitleSelection(val sourceUrl: String?, val targetLanguage: String? = null)
+
 @UnstableApi
 object PlayerHolder {
     private const val MAX_CACHE_BYTES = 256L * 1024L * 1024L
@@ -64,6 +66,17 @@ object PlayerHolder {
 
     private var equalizerEffect: PresetEqualizer? = null
     private var equalizerSessionId: Int = C.AUDIO_SESSION_ID_UNSET
+    private var selectedSubtitleUrl: String? = null
+    private var selectedSubtitleTarget: String? = null
+    private var textTracksEnabled: Boolean = false
+    val subtitlesEnabled: Boolean get() = textTracksEnabled
+    val currentSubtitleSelection: SubtitleSelection
+        get() = SubtitleSelection(selectedSubtitleUrl, selectedSubtitleTarget)
+
+    fun setSubtitleSelection(selection: SubtitleSelection) {
+        selectedSubtitleUrl = selection.sourceUrl
+        selectedSubtitleTarget = selection.targetLanguage
+    }
     val audioSessionId: Int get() = runCatching { player.audioSessionId }.getOrDefault(C.AUDIO_SESSION_ID_UNSET)
     val player: ExoPlayer by lazy { buildPlayer() }
 
@@ -280,8 +293,7 @@ object PlayerHolder {
         startMs: Long = 0,
         audioTrackId: String? = _audioTrack.value,
         loop: Boolean = false,
-        subtitleSourceUrl: String? = null,
-        subtitleTargetLanguage: String? = null,
+        subtitleSelection: SubtitleSelection? = null,
     ) {
         if (loop) _repeatMode.value = "one"
         loopRepeatEnabled = _repeatMode.value == "one"
@@ -290,6 +302,23 @@ object PlayerHolder {
         _audioTrack.value = audioTrackId
         val same = _current.value?.video?.id == d.video.id
         val resumeAt = if (same && startMs == 0L) player.currentPosition else startMs
+        if (!same) {
+            selectedSubtitleUrl = d.subtitles.firstOrNull()?.url
+            selectedSubtitleTarget = null
+            textTracksEnabled = false
+        }
+        subtitleSelection?.let {
+            selectedSubtitleUrl = it.sourceUrl
+            selectedSubtitleTarget = it.targetLanguage
+        }
+        if (d.subtitles.none { it.url == selectedSubtitleUrl }) {
+            selectedSubtitleUrl = d.subtitles.firstOrNull()?.url
+            selectedSubtitleTarget = null
+        }
+        val selectedTrack = d.subtitles.firstOrNull { it.url == selectedSubtitleUrl }
+        selectedSubtitleTarget = selectedSubtitleTarget?.takeIf {
+            selectedTrack != null && !it.equals(selectedTrack.languageTag.substringBefore('-'), ignoreCase = true)
+        }
 
         val meta = MediaMetadata.Builder()
             .setTitle(d.video.title)
@@ -298,17 +327,16 @@ object PlayerHolder {
             .build()
         val subtitleConfigurations = if (d.isLive) emptyList() else buildList {
             d.subtitles.forEach { track ->
+                val isSelected = selectedSubtitleUrl == track.url
+                val target = selectedSubtitleTarget.takeIf { isSelected && !it.isNullOrBlank() }
                 add(
                     MediaItem.SubtitleConfiguration.Builder(Uri.parse(track.url))
                         .setMimeType(track.mimeType)
                         .setLanguage(track.languageTag)
                         .setLabel("${track.languageName} · Original")
+                        .setSelectionFlags(if (isSelected && target == null) C.SELECTION_FLAG_DEFAULT else 0)
                         .build()
                 )
-                val target = subtitleTargetLanguage?.takeIf {
-                    subtitleSourceUrl == track.url && it.isNotBlank() &&
-                        !it.equals(track.languageTag.substringBefore('-'), ignoreCase = true)
-                }
                 if (target != null) {
                     val translatedUri = Uri.parse(track.url).buildUpon()
                         .appendQueryParameter("tlang", target)
@@ -318,6 +346,7 @@ object PlayerHolder {
                             .setMimeType(track.mimeType)
                             .setLanguage(target)
                             .setLabel("${track.languageName} · YouTube auto-translate")
+                            .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
                             .build()
                     )
                 }
@@ -355,6 +384,9 @@ object PlayerHolder {
 
         _current.value = d
         player.setMediaSource(source)
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !textTracksEnabled)
+            .build()
         player.prepare()
         if (resumeAt > 0) player.seekTo(resumeAt)
         player.setPlaybackSpeed(_speed.value)
@@ -377,6 +409,9 @@ object PlayerHolder {
         equalizerEffect?.release()
         equalizerEffect = null
         equalizerSessionId = C.AUDIO_SESSION_ID_UNSET
+        selectedSubtitleUrl = null
+        selectedSubtitleTarget = null
+        textTracksEnabled = false
         _current.value = null
         _playing.value = false
         segments = emptyList()
@@ -435,6 +470,7 @@ object PlayerHolder {
 
     /** Enables or disables the native text renderer used by YouTube's original subtitle tracks. */
     fun setSubtitlesEnabled(enabled: Boolean) {
+        textTracksEnabled = enabled
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !enabled)
             .build()
