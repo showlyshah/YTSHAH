@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Subscriptions
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,6 +27,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,8 +35,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.viewtube.app.data.Graph
+import com.viewtube.app.data.Paged
 import com.viewtube.app.data.VideoItem
 import com.viewtube.app.player.PlayerHolder
+import kotlinx.coroutines.launch
 
 @Composable
 fun MiniPlayer(onOpen: (String) -> Unit) {
@@ -59,20 +63,68 @@ fun MiniPlayer(onOpen: (String) -> Unit) {
 @Composable
 fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
     var videos by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
+    var nextPage by remember { mutableStateOf<(suspend () -> Paged<VideoItem>)?>(null) }
     var loading by remember { mutableStateOf(true) }
+    var loadingMore by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+
     LaunchedEffect(Unit) {
-        runCatching { Graph.repo.trending() }
-            .onSuccess { all -> videos = all.filter { it.isShort }.ifEmpty { all.take(12) } }
+        runCatching { Graph.repo.shorts() }
+            .onSuccess { page ->
+                videos = page.items.distinctBy { it.id }
+                nextPage = page.next
+                error = null
+            }
             .onFailure { error = it.message ?: "Could not load Shorts." }
         loading = false
     }
+
+    fun loadMore() {
+        val fetch = nextPage ?: return
+        if (loadingMore) return
+        scope.launch {
+            loadingMore = true
+            runCatching { fetch() }
+                .onSuccess { page ->
+                    videos = (videos + page.items).distinctBy { it.id }
+                    nextPage = page.next
+                    error = null
+                }
+                .onFailure { error = it.message ?: "Could not load more Shorts." }
+            loadingMore = false
+        }
+    }
+
     Column(Modifier.fillMaxSize()) {
         TopBar(onSearch = {}, onAccount = {})
         when {
             loading -> Loading()
-            videos.isEmpty() -> Message("No Shorts available", error ?: "Try again later.")
-            else -> LazyColumn(Modifier.fillMaxSize()) { items(videos, key = { it.id }) { video -> VideoCard(video, { onVideo(video) }, onChannel) } }
+            videos.isEmpty() && nextPage == null ->
+                Message("No Shorts found", error ?: "The source did not return any videos identified as Shorts.")
+            else -> LazyColumn(Modifier.fillMaxSize()) {
+                items(videos, key = { it.id }) { video ->
+                    VideoCard(video, { onVideo(video) }, onChannel)
+                }
+                item {
+                    if (nextPage != null) {
+                        Button(
+                            onClick = { loadMore() },
+                            enabled = !loadingMore,
+                            modifier = Modifier.fillMaxWidth().padding(16.dp)
+                        ) {
+                            Text(if (loadingMore) "Loading…" else "Load more Shorts")
+                        }
+                    } else if (videos.isNotEmpty()) {
+                        Text(
+                            "You're all caught up",
+                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    error?.let { Text(it, modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error) }
+                }
+            }
         }
     }
 }
