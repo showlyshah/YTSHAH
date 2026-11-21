@@ -91,10 +91,10 @@ class YtDataSource(private val upstream: DataSource) : DataSource {
         val url = uri.toString()
         return when {
             Yt.isVisionOsStreamingUrl(url) -> mapOf("User-Agent" to Yt.getVisionOsUserAgent(null))
-            Yt.isWebStreamingUrl(url) -> mapOf(
+            Yt.isWebStreamingUrl(url) || uriHostIsYouTube(url) -> mapOf(
                 "User-Agent" to DownloaderImpl.USER_AGENT,
                 "Origin" to "https://www.youtube.com",
-                "Referer" to "https://www.youtube.com",
+                "Referer" to "https://www.youtube.com/",
             )
             uriHostIsGoogleVideo(url) -> mapOf(
                 "User-Agent" to DownloaderImpl.USER_AGENT,
@@ -104,6 +104,12 @@ class YtDataSource(private val upstream: DataSource) : DataSource {
             else -> emptyMap()
         }
     }
+
+    private fun uriHostIsYouTube(url: String): Boolean =
+        runCatching {
+            val host = Uri.parse(url).host.orEmpty()
+            host == "youtube.com" || host.endsWith(".youtube.com") || host.endsWith(".youtube-nocookie.com")
+        }.getOrDefault(false)
 
     private fun uriHostIsGoogleVideo(url: String): Boolean =
         runCatching { Uri.parse(url).host?.endsWith("googlevideo.com") == true }.getOrDefault(false)
