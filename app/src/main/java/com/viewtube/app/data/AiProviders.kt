@@ -49,6 +49,7 @@ class BasicLocalAiEngine : LocalAiEngine {
                 "Local diagnostic mode: inspect the failing component, network state, source response and recent playback logs. No code changes are made automatically.",
                 "On-device rules", false
             )
+            AiTask.SUBTITLE_TRANSLATION -> null
         }
     }
 }
@@ -79,9 +80,15 @@ class OpenAiCompatibleProvider(
             put("messages", JSONArray().put(
                 JSONObject().put("role", "system").put(
                     "content",
-                    "You are ViewTube's video assistant. Ground answers only in supplied source material. " +
-                        "If the source is insufficient, clearly say so. Do not invent transcript details, timestamps, " +
-                        "or claims. Keep summaries structured and concise."
+                    if (request.task == AiTask.SUBTITLE_TRANSLATION) {
+                        "You are a professional subtitle translator. Translate only the supplied subtitle text " +
+                            "into the target language requested by the user. Preserve meaning, names, tone and punctuation. " +
+                            "Return only the translated subtitle line, with no explanation or quotation marks."
+                    } else {
+                        "You are ViewTube's video assistant. Ground answers only in supplied source material. " +
+                            "If the source is insufficient, clearly say so. Do not invent transcript details, timestamps, " +
+                            "or claims. Keep summaries structured and concise."
+                    }
                 )
             ).put(JSONObject().put("role", "user").put("content", userContent)))
             put("temperature", 0.2)
