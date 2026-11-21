@@ -156,6 +156,22 @@ object PlayerHolder {
         advanceToNext(current, onAdvanced, "manual_next")
     }
 
+    /** Plays the most recently watched different item; if none exists, restarts this item. */
+    fun playPrevious() {
+        val current = _current.value ?: return
+        val previous = Graph.store.history.value.firstOrNull { it.id != current.video.id }
+        if (previous == null) {
+            player.seekTo(0)
+            return
+        }
+        scope.launch {
+            runCatching {
+                val details = Graph.repo.details(previous.id)
+                play(details, startMs = Graph.store.positionOf(previous.id))
+            }.onFailure { Graph.diagnostics.record("media_previous", it) }
+        }
+    }
+
     private fun advanceToNext(d: VideoDetails, onAdvanced: ((String) -> Unit)?, tag: String) {
         scope.launch {
             // A user-curated queue always takes priority over discovery.
