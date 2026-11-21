@@ -437,7 +437,7 @@ fun AccountScreen(onBack: () -> Unit) {
                     Text("About ViewTube", fontWeight = FontWeight.Medium)
                     Text("Version, AI and open-source credits", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Open About", modifier = Modifier.size(20.dp))
+                Text("Open", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
             }
         }
 
