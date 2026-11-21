@@ -22,6 +22,8 @@ class LocalStore(context: Context) {
     private val _searches = MutableStateFlow(loadStrings("searches"))
     private val _prefHeight = MutableStateFlow(prefs.getInt("pref_height", 0))
     private val _preferredAudioBitrate = MutableStateFlow(prefs.getInt("preferred_audio_bitrate", 0))
+    private val _shortsHeight = MutableStateFlow(prefs.getInt("shorts_height", -1))
+    private val _shortsAudioBitrate = MutableStateFlow(prefs.getInt("shorts_audio_bitrate", 0))
     private val _sponsorSkip = MutableStateFlow(prefs.getBoolean("sponsor_skip", true))
     private val _autoplay = MutableStateFlow(prefs.getBoolean("autoplay_next", true))
     private val _personalizedRecommendations = MutableStateFlow(prefs.getBoolean("personalized_recommendations", false))
@@ -42,6 +44,10 @@ class LocalStore(context: Context) {
     val preferredHeight: StateFlow<Int> = _prefHeight.asStateFlow()
     /** Audio bitrate preference in bits/second; 0 means highest available. */
     val preferredAudioBitrate: StateFlow<Int> = _preferredAudioBitrate.asStateFlow()
+    /** Shorts video height: -1 = maximum, 0 = automatic, otherwise requested height. */
+    val shortsHeight: StateFlow<Int> = _shortsHeight.asStateFlow()
+    /** Shorts audio bitrate in bits/second; 0 = highest available. */
+    val shortsAudioBitrate: StateFlow<Int> = _shortsAudioBitrate.asStateFlow()
     val sponsorSkip: StateFlow<Boolean> = _sponsorSkip.asStateFlow()
     val autoplayNext: StateFlow<Boolean> = _autoplay.asStateFlow()
     val personalizedRecommendations: StateFlow<Boolean> = _personalizedRecommendations.asStateFlow()
@@ -142,6 +148,8 @@ class LocalStore(context: Context) {
     fun setProfileName(name: String) { _profile.value = name.trim(); prefs.edit().putString("profile_name", name.trim()).apply() }
     fun setPreferredHeight(h: Int) { _prefHeight.value = h.coerceIn(-1, 4320); prefs.edit().putInt("pref_height", _prefHeight.value).apply() }
     fun setPreferredAudioBitrate(bitrate: Int) { _preferredAudioBitrate.value = bitrate.coerceIn(0, 512000); prefs.edit().putInt("preferred_audio_bitrate", _preferredAudioBitrate.value).apply() }
+    fun setShortsHeight(height: Int) { _shortsHeight.value = height.coerceIn(-1, 4320); prefs.edit().putInt("shorts_height", _shortsHeight.value).apply() }
+    fun setShortsAudioBitrate(bitrate: Int) { _shortsAudioBitrate.value = bitrate.coerceIn(0, 512000); prefs.edit().putInt("shorts_audio_bitrate", _shortsAudioBitrate.value).apply() }
     fun setSponsorSkip(on: Boolean) { _sponsorSkip.value = on; prefs.edit().putBoolean("sponsor_skip", on).apply() }
     fun setAutoplayNext(on: Boolean) { _autoplay.value = on; prefs.edit().putBoolean("autoplay_next", on).apply() }
     fun setPersonalizedRecommendations(on: Boolean) { _personalizedRecommendations.value = on; prefs.edit().putBoolean("personalized_recommendations", on).apply() }
@@ -164,6 +172,8 @@ class LocalStore(context: Context) {
         put("positions", positions)
         put("preferredHeight", _prefHeight.value)
         put("preferredAudioBitrate", _preferredAudioBitrate.value)
+        put("shortsHeight", _shortsHeight.value)
+        put("shortsAudioBitrate", _shortsAudioBitrate.value)
         put("sponsorSkip", _sponsorSkip.value)
         put("autoplayNext", _autoplay.value)
         put("personalizedRecommendations", _personalizedRecommendations.value)
@@ -201,6 +211,8 @@ class LocalStore(context: Context) {
         _profile.value = root.optString("profileName"); prefs.edit().putString("profile_name", _profile.value).apply()
         _prefHeight.value = root.optInt("preferredHeight", 0).coerceIn(-1, 4320)
         _preferredAudioBitrate.value = root.optInt("preferredAudioBitrate", 0).coerceIn(0, 512000)
+        _shortsHeight.value = root.optInt("shortsHeight", -1).coerceIn(-1, 4320)
+        _shortsAudioBitrate.value = root.optInt("shortsAudioBitrate", 0).coerceIn(0, 512000)
         _sponsorSkip.value = root.optBoolean("sponsorSkip", true)
         _autoplay.value = root.optBoolean("autoplayNext", true)
         _personalizedRecommendations.value = root.optBoolean("personalizedRecommendations", false)
@@ -210,6 +222,8 @@ class LocalStore(context: Context) {
         prefs.edit()
             .putInt("pref_height", _prefHeight.value)
             .putInt("preferred_audio_bitrate", _preferredAudioBitrate.value)
+            .putInt("shorts_height", _shortsHeight.value)
+            .putInt("shorts_audio_bitrate", _shortsAudioBitrate.value)
             .putBoolean("sponsor_skip", _sponsorSkip.value)
             .putBoolean("autoplay_next", _autoplay.value)
             .putBoolean("personalized_recommendations", _personalizedRecommendations.value)
@@ -250,6 +264,7 @@ class LocalStore(context: Context) {
         prefs.edit().clear().apply()
         _subs.value = emptyList(); _history.value = emptyList(); _later.value = emptyList(); _queue.value = emptyList()
         _profile.value = ""; _searches.value = emptyList(); _prefHeight.value = 0; _preferredAudioBitrate.value = 0
+        _shortsHeight.value = -1; _shortsAudioBitrate.value = 0
         _sponsorSkip.value = true; _autoplay.value = true; _personalizedRecommendations.value = false; _cloudAiEnabled.value = false; _themeMode.value = "system"; _dataSaver.value = false
         _pipedServer.value = "https://pipedapi.adminforge.de"; _pipedUser.value = null
         positions.keys().asSequence().toList().forEach { positions.remove(it) }
