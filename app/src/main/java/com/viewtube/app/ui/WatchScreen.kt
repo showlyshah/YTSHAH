@@ -28,6 +28,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Slider
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -125,8 +126,13 @@ fun WatchScreen(
     var useCloudForAi by remember { mutableStateOf(false) }
     var gestureFeedback by remember { mutableStateOf<String?>(null) }
     var translationEnabled by remember { mutableStateOf(false) }
+    var captionsEnabled by remember { mutableStateOf(true) }
+    var showEqualizer by remember { mutableStateOf(false) }
+    var equalizer by remember { mutableStateOf<android.media.audiofx.Equalizer?>(null) }
+    var eqLevels by remember { mutableStateOf<List<Int>>(emptyList()) }
     var selectedSubtitleTrack by remember { mutableStateOf<SubtitleTrack?>(null) }
-    var translationTarget by remember { mutableStateOf(java.util.Locale.getDefault().language.takeIf { it in setOf("en", "ml", "hi", "ta", "te", "ar", "fr", "es") } ?: "en") }
+    val translationLanguages = remember { com.google.mlkit.nl.translate.TranslateLanguage.getAllLanguages().sortedBy { java.util.Locale.forLanguageTag(it).getDisplayLanguage(java.util.Locale.getDefault()) } }
+    var translationTarget by remember { mutableStateOf(java.util.Locale.getDefault().language.takeIf { it in translationLanguages } ?: "en") }
     var translatedCaption by remember { mutableStateOf<String?>(null) }
     var translationError by remember { mutableStateOf<String?>(null) }
     val audioSel by PlayerHolder.audioTrack.collectAsStateCompat()
@@ -166,15 +172,18 @@ fun WatchScreen(
         PlayerHolder.advanced.collect { id -> if (id != videoId) onVideo(id) }
     }
 
-    LaunchedEffect(videoId, translationEnabled, selectedSubtitleTrack, translationTarget) {
+    LaunchedEffect(videoId, captionsEnabled, translationEnabled, selectedSubtitleTrack, translationTarget) {
         translatedCaption = null
         translationError = null
         val track = selectedSubtitleTrack
-        if (!translationEnabled || track == null) return@LaunchedEffect
+        if (!captionsEnabled || track == null) return@LaunchedEffect
         var translator: OnDeviceSubtitleTranslator? = null
         try {
             val cues = Graph.repo.subtitleCues(track)
-            val activeTranslator = OnDeviceSubtitleTranslator.create(track.languageTag, translationTarget)
+            val sourceCode = com.google.mlkit.nl.translate.TranslateLanguage.fromLanguageTag(track.languageTag)
+            val targetCode = com.google.mlkit.nl.translate.TranslateLanguage.fromLanguageTag(translationTarget)
+            val shouldTranslate = translationEnabled && sourceCode != null && targetCode != null && sourceCode != targetCode
+            val activeTranslator = if (shouldTranslate) OnDeviceSubtitleTranslator.create(track.languageTag, translationTarget) else null
             translator = activeTranslator
             var previousText: String? = null
             while (true) {
@@ -182,16 +191,35 @@ fun WatchScreen(
                 val sourceText = cues.firstOrNull { position >= it.startMs && position < it.endMs }?.text
                 if (sourceText != previousText) {
                     previousText = sourceText
-                    translatedCaption = if (sourceText.isNullOrBlank()) null else activeTranslator.translate(sourceText)
+                    translatedCaption = when {
+                        sourceText.isNullOrBlank() -> null
+                        activeTranslator != null -> activeTranslator.translate(sourceText)
+                        else -> sourceText
+                    }
                 }
                 kotlinx.coroutines.delay(180)
             }
         } catch (error: Throwable) {
             if (error is kotlinx.coroutines.CancellationException) throw error
-            translationError = error.message ?: "Translation is unavailable for this subtitle track."
+            translationError = error.message ?: "Subtitle loading or translation failed."
             translatedCaption = null
         } finally {
             translator?.close()
+        }
+    }
+
+    DisposableEffect(showEqualizer, videoId) {
+        if (showEqualizer) {
+            val effect = runCatching {
+                android.media.audiofx.Equalizer(0, PlayerHolder.player.audioSessionId).apply { enabled = true }
+            }.getOrNull()
+            equalizer = effect
+            eqLevels = effect?.let { eq -> (0 until eq.numberOfBands.toInt()).map { eq.getBandLevel(it.toShort()).toInt() } }.orEmpty()
+        }
+        onDispose {
+            runCatching { equalizer?.release() }
+            equalizer = null
+            eqLevels = emptyList()
         }
     }
 
@@ -236,8 +264,7 @@ fun WatchScreen(
                     PlayerView(c).apply {
                         player = PlayerHolder.player
                         resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                        setShowSubtitleButton(true)
-                        setFullscreenButtonClickListener { fullscreen = it }
+                        setShowSubtitleButton(false)
                     }
                 },
                 update = { it.player = PlayerHolder.player },
@@ -247,6 +274,9 @@ fun WatchScreen(
                 Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Minimize", tint = Color.White)
             }
             Row(Modifier.align(Alignment.TopEnd).padding(3.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { sheet = true }, modifier = Modifier.size(38.dp)) { Text("HD", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+                IconButton(onClick = { sheet = true }, modifier = Modifier.size(38.dp)) { Text("CC", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+                IconButton(onClick = { showEqualizer = true }, modifier = Modifier.size(38.dp)) { Text("EQ", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
                 IconButton(onClick = { sheet = true }, modifier = Modifier.size(38.dp)) {
                     Icon(Icons.Default.MoreVert, contentDescription = "Player options", tint = Color.White, modifier = Modifier.size(19.dp))
                 }
@@ -477,32 +507,39 @@ fun WatchScreen(
                     }
                 }
             }
-            SheetTitle("Live subtitle translation")
+            SheetTitle("Subtitles & AI translation")
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("Translate captions", fontWeight = FontWeight.Medium)
-                    Text("On-device translation · captions required", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Show subtitles", fontWeight = FontWeight.Medium)
+                    Text("Display the selected caption track", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Switch(checked = translationEnabled, onCheckedChange = { translationEnabled = it })
+                Switch(checked = captionsEnabled, onCheckedChange = { captionsEnabled = it })
             }
             if (dd.subtitles.isEmpty()) {
                 Text("No subtitle tracks are available for this video.", modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
                     fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 SheetTitle("Caption language")
-                dd.subtitles.take(12).forEach { track ->
+                dd.subtitles.forEach { track ->
                     SheetRow(track.languageName + if (track.autoGenerated) " · auto" else "",
                         selectedSubtitleTrack?.url == track.url) {
                         selectedSubtitleTrack = track
                     }
                 }
-                SheetTitle("Translate into")
-                listOf("en" to "English", "ml" to "Malayalam", "hi" to "Hindi", "ta" to "Tamil",
-                    "te" to "Telugu", "ar" to "Arabic", "fr" to "French", "es" to "Spanish").forEach { (code, label) ->
-                    SheetRow(label, translationTarget == code) { translationTarget = code }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Translate subtitles", fontWeight = FontWeight.Medium)
+                        Text("On-device AI · supported languages", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = translationEnabled, onCheckedChange = { translationEnabled = it })
+                }
+                SheetTitle("Show subtitles in")
+                translationLanguages.forEach { code ->
+                    val label = java.util.Locale.forLanguageTag(code).getDisplayName(java.util.Locale.getDefault())
+                    SheetRow(label.replaceFirstChar { it.uppercase() }, translationTarget == code) { translationTarget = code }
                 }
             }
             translationError?.let {
@@ -533,6 +570,59 @@ fun WatchScreen(
             }
         }
     }
+
+    if (showEqualizer) ModalBottomSheet(onDismissRequest = { showEqualizer = false }) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
+            Text("Audio equalizer", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+            Text("Uses the Android device audio effect. Availability depends on the device and active audio session.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
+            val eq = equalizer
+            if (eq == null) {
+                Text("The device did not provide an equalizer for this playback session.", color = MaterialTheme.colorScheme.error)
+            } else {
+                if (eq.numberOfPresets.toInt() > 0) {
+                    Text("Presets", fontWeight = FontWeight.Medium)
+                    LazyColumn(Modifier.height(150.dp)) {
+                        items((0 until eq.numberOfPresets.toInt()).toList()) { index ->
+                            val name = runCatching { eq.getPresetName(index.toShort()).toString() }.getOrDefault("Preset $index")
+                            SheetRow(name, false) {
+                                runCatching {
+                                    eq.usePreset(index.toShort())
+                                    eqLevels = (0 until eq.numberOfBands.toInt()).map { eq.getBandLevel(it.toShort()).toInt() }
+                                }
+                            }
+                        }
+                    }
+                }
+                Text("Frequency bands", fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
+                (0 until eq.numberOfBands.toInt()).forEach { index ->
+                    val range = eq.bandLevelRange
+                    val current = eqLevels.getOrNull(index) ?: eq.getBandLevel(index.toShort()).toInt()
+                    val frequency = runCatching { eq.getCenterFreq(index.toShort()) / 1000 }.getOrDefault(0)
+                    Column(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                        Text("${frequency} Hz · ${current} dB", fontSize = 12.sp)
+                        Slider(
+                            value = current.toFloat(),
+                            onValueChange = { value ->
+                                val level = value.toInt()
+                                runCatching { eq.setBandLevel(index.toShort(), level.toShort()) }
+                                eqLevels = eqLevels.toMutableList().also { list ->
+                                    while (list.size <= index) list.add(0)
+                                    list[index] = level
+                                }
+                            },
+                            valueRange = range[0].toFloat()..range[1].toFloat()
+                        )
+                    }
+                }
+                OutlinedButton(onClick = {
+                    runCatching { eq.enabled = false }
+                    showEqualizer = false
+                }, modifier = Modifier.fillMaxWidth()) { Text("Turn off equalizer") }
+            }
+        }
+    }
+
     if (queueSheet) ModalBottomSheet(onDismissRequest = { queueSheet = false }) {
         Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
             Row(
