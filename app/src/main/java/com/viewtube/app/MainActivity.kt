@@ -65,6 +65,21 @@ class MainActivity : ComponentActivity() {
 
     private var pendingVideo by mutableStateOf<String?>(null)
     private var onWatchScreen = false
+    private var activityResumed = false
+    private val playbackAwakeListener = object : androidx.media3.common.Player.Listener {
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            updateKeepScreenOn(isPlaying)
+        }
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            updateKeepScreenOn(playWhenReady && PlayerHolder.player.playbackState != androidx.media3.common.Player.STATE_ENDED)
+        }
+    }
+
+    private fun updateKeepScreenOn(playing: Boolean) {
+        if (!activityResumed) return
+        if (playing) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -90,11 +105,15 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Keep the display awake while ViewTube is the foreground app.
-        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        activityResumed = true
+        PlayerHolder.player.addListener(playbackAwakeListener)
+        // Keep the display awake only while media is actively playing in the foreground.
+        updateKeepScreenOn(PlayerHolder.player.isPlaying || PlayerHolder.player.playWhenReady)
     }
 
     override fun onStop() {
+        activityResumed = false
+        PlayerHolder.player.removeListener(playbackAwakeListener)
         window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         super.onStop()
     }
