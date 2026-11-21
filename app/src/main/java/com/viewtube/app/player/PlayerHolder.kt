@@ -326,30 +326,30 @@ object PlayerHolder {
             .setArtworkUri(d.video.thumbnail?.let { android.net.Uri.parse(it) })
             .build()
         val subtitleConfigurations = if (d.isLive) emptyList() else buildList {
-            d.subtitles.forEach { track ->
-                val isSelected = selectedSubtitleUrl == track.url
-                val target = selectedSubtitleTarget.takeIf { isSelected && !it.isNullOrBlank() }
+            // Attach only the chosen source track. Loading every available language in parallel
+            // wastes requests and lets an unused/expired track interfere with playback.
+            val track = d.subtitles.firstOrNull { it.url == selectedSubtitleUrl } ?: return@buildList
+            val target = selectedSubtitleTarget
+            add(
+                MediaItem.SubtitleConfiguration.Builder(Uri.parse(track.url))
+                    .setMimeType(track.mimeType)
+                    .setLanguage(track.languageTag)
+                    .setLabel("${track.languageName} · Original")
+                    .setSelectionFlags(if (target == null) C.SELECTION_FLAG_DEFAULT else 0)
+                    .build()
+            )
+            if (target != null) {
+                val translatedUri = Uri.parse(track.url).buildUpon()
+                    .appendQueryParameter("tlang", target)
+                    .build()
                 add(
-                    MediaItem.SubtitleConfiguration.Builder(Uri.parse(track.url))
+                    MediaItem.SubtitleConfiguration.Builder(translatedUri)
                         .setMimeType(track.mimeType)
-                        .setLanguage(track.languageTag)
-                        .setLabel("${track.languageName} · Original")
-                        .setSelectionFlags(if (isSelected && target == null) C.SELECTION_FLAG_DEFAULT else 0)
+                        .setLanguage(target)
+                        .setLabel("${track.languageName} · YouTube auto-translate")
+                        .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
                         .build()
                 )
-                if (target != null) {
-                    val translatedUri = Uri.parse(track.url).buildUpon()
-                        .appendQueryParameter("tlang", target)
-                        .build()
-                    add(
-                        MediaItem.SubtitleConfiguration.Builder(translatedUri)
-                            .setMimeType(track.mimeType)
-                            .setLanguage(target)
-                            .setLabel("${track.languageName} · YouTube auto-translate")
-                            .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
-                            .build()
-                    )
-                }
             }
         }
         val item = MediaItem.Builder()
