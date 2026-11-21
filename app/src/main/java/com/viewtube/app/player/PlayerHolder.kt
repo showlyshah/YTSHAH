@@ -63,6 +63,9 @@ object PlayerHolder {
     private val _audioTrack = MutableStateFlow<String?>(null)
     val audioTrack: StateFlow<String?> = _audioTrack.asStateFlow()
 
+    private val _audioBitrate = MutableStateFlow(0)
+    val audioBitrate: StateFlow<Int> = _audioBitrate.asStateFlow()
+
     private val _speed = MutableStateFlow(1f)
     val speed: StateFlow<Float> = _speed.asStateFlow()
 
@@ -134,12 +137,12 @@ object PlayerHolder {
         (d.videoOnly.filter { it.deliveryMethod != DeliveryMethod.TORRENT }.map { it.height } + d.muxed.filter { it.deliveryMethod != DeliveryMethod.TORRENT }.map { it.height })
             .filter { it > 0 }.distinct().sortedDescending()
 
-    /** The user's preferred height, else 480p on mobile data and 720p on Wi-Fi. */
+    /** Auto selects the highest stream exposed for this video; a saved preference still wins. */
     fun defaultHeight(d: VideoDetails): Int {
         val all = heights(d)
         val pref = Graph.store.preferredHeight.value
-        val target = if (pref > 0) pref else if (isMetered()) 480 else 720
-        return all.firstOrNull { it <= target } ?: all.lastOrNull() ?: 0
+        return if (pref > 0) all.firstOrNull { it <= pref } ?: all.lastOrNull() ?: 0
+        else all.firstOrNull() ?: 0
     }
 
     private fun isMetered(): Boolean = runCatching {
@@ -153,14 +156,24 @@ object PlayerHolder {
             .map { (it.audioTrackId ?: "") to (it.audioTrackName ?: it.audioLocale?.displayName ?: it.audioTrackId ?: "Track") }
             .let { if (it.size > 1) it else emptyList() }
 
-    private fun bestAudio(list: List<AudioStream>, trackId: String?): AudioStream? {
+    /** Selects the best available audio stream, optionally constrained to a language and bitrate. */
+    private fun bestAudio(list: List<AudioStream>, trackId: String?, bitrate: Int): AudioStream? {
         val playable = list.filter { it.deliveryMethod != DeliveryMethod.TORRENT }
         val chosen = if (trackId != null) playable.filter { it.audioTrackId == trackId } else emptyList()
         val original = chosen.ifEmpty {
             playable.filter { it.audioTrackType == null || it.audioTrackType?.name == "ORIGINAL" }.ifEmpty { playable }
         }
-        return original.filter { it.format == MediaFormat.M4A }.maxByOrNull { it.averageBitrate }
+        val quality = if (bitrate > 0) original.firstOrNull { it.averageBitrate == bitrate } ?: original.maxByOrNull { it.averageBitrate } else null
+        return quality ?: original.filter { it.format == MediaFormat.M4A }.maxByOrNull { it.averageBitrate }
             ?: original.maxByOrNull { it.averageBitrate }
+    }
+
+    /** Distinct audio bitrates available for the selected language, highest first. */
+    fun audioQualities(d: VideoDetails, trackId: String? = _audioTrack.value): List<Pair<Int, String>> {
+        val streams = d.audio.filter { it.deliveryMethod != DeliveryMethod.TORRENT &&
+            (trackId == null || it.audioTrackId == trackId) }
+        return streams.map { it.averageBitrate }.filter { it > 0 }.distinct().sortedDescending()
+            .map { it to "${(it + 500) / 1000} kbps" }
     }
 
     private fun bestVideo(list: List<VideoStream>, height: Int): VideoStream? {
@@ -190,9 +203,11 @@ object PlayerHolder {
         wantedHeight: Int = defaultHeight(d),
         startMs: Long = 0,
         audioTrackId: String? = _audioTrack.value,
+        audioBitrate: Int = _audioBitrate.value,
         loop: Boolean = false,
     ) {
         looping = loop
+        _audioBitrate.value = audioBitrate
         player.repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
         _audioTrack.value = audioTrackId
         val same = _current.value?.video?.id == d.video.id
@@ -212,7 +227,7 @@ object PlayerHolder {
                 .createMediaSource(item.buildUpon().setUri(d.hlsUrl).build())
             _height.value = 0
         } else {
-            val audio = bestAudio(d.audio, audioTrackId)
+            val audio = bestAudio(d.audio, audioTrackId, audioBitrate)
             val videoOnly = bestVideo(d.videoOnly, wantedHeight)
             val muxed = bestVideo(d.muxed, wantedHeight)
             val playableMuxed = d.muxed.filter { it.deliveryMethod != DeliveryMethod.TORRENT }
@@ -240,7 +255,11 @@ object PlayerHolder {
 
         if (!same) loadSegments(d.video.id)
         startWatching(d)
-        appContext.startService(Intent(appContext, PlaybackService::class.java))
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            appContext.startForegroundService(Intent(appContext, PlaybackService::class.java))
+        } else {
+            appContext.startService(Intent(appContext, PlaybackService::class.java))
+        }
     }
 
     fun stop() {
@@ -255,6 +274,7 @@ object PlayerHolder {
         _current.value = null
         _height.value = 0
         _audioTrack.value = null
+        _audioBitrate.value = 0
         _skipNotice.value = null
         _playing.value = false
         segments = emptyList()
