@@ -36,10 +36,16 @@ class ShortsPlayerController private constructor() {
     val loading: StateFlow<Set<Int>> = _loading.asStateFlow()
     private val _failed = MutableStateFlow<Set<String>>(emptySet())
     val failed: StateFlow<Set<String>> = _failed.asStateFlow()
+    private val _playing = MutableStateFlow(false)
+    val playing: StateFlow<Boolean> = _playing.asStateFlow()
 
     init {
         slots.forEachIndexed { index, slot ->
             slot.player.addListener(object : Player.Listener {
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    if (slots.getOrNull(index) === slot && slot.player.playWhenReady) _playing.value = isPlaying
+                }
+
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (playbackState == Player.STATE_READY) {
                         _loading.value = _loading.value - index
@@ -71,6 +77,7 @@ class ShortsPlayerController private constructor() {
         slots.forEachIndexed { index, slot ->
             slot.player.playWhenReady = index == activeSlot && slot.videoId == videos[page].id
         }
+        _playing.value = slots[activeSlot].player.isPlaying
         // Resolve the next stream details one page further ahead while the adjacent player buffers.
         videos.getOrNull(page + 2)?.let { next ->
             scope.launch(Dispatchers.IO) { runCatching { Graph.repo.details(next.id) } }
@@ -109,6 +116,7 @@ class ShortsPlayerController private constructor() {
     fun togglePlayPause(page: Int) {
         val player = playerFor(page)
         if (player.playWhenReady) player.pause() else player.play()
+        _playing.value = player.playWhenReady
     }
 
     fun stop() {
@@ -121,6 +129,7 @@ class ShortsPlayerController private constructor() {
             slot.videoId = null
         }
         _loading.value = emptySet()
+        _playing.value = false
     }
 
     companion object {
