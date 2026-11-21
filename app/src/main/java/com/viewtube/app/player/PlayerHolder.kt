@@ -246,9 +246,16 @@ object PlayerHolder {
     fun stop() {
         saveProgress()
         watcher?.cancel(); saver?.cancel(); segmentJob?.cancel(); segmentJob = null
+        // stop() alone does not clear playWhenReady; some controllers can therefore
+        // keep presenting the session as active. Pause first, then clear the media item.
+        player.pause()
+        player.playWhenReady = false
         player.stop()
         player.clearMediaItems()
         _current.value = null
+        _height.value = 0
+        _audioTrack.value = null
+        _skipNotice.value = null
         _playing.value = false
         segments = emptyList()
         runCatching { appContext.stopService(Intent(appContext, PlaybackService::class.java)) }
