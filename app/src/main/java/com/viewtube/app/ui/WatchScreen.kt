@@ -82,6 +82,7 @@ import com.viewtube.app.data.errorText
 import com.viewtube.app.data.watchUrl
 import com.viewtube.app.player.PlayerHolder
 import com.viewtube.app.player.PresetEqualizer
+import com.viewtube.app.player.SubtitleSelection
 import kotlinx.coroutines.launch
 
 private fun Context.activity(): Activity? {
@@ -130,7 +131,7 @@ fun WatchScreen(
     var useCloudForAi by remember { mutableStateOf(false) }
     var gestureFeedback by remember { mutableStateOf<String?>(null) }
     var translationEnabled by remember { mutableStateOf(false) }
-    var captionsEnabled by remember { mutableStateOf(true) }
+    var captionsEnabled by remember { mutableStateOf(false) }
     var showEqualizer by remember { mutableStateOf(false) }
     var equalizer by remember { mutableStateOf<PresetEqualizer?>(null) }
     var equalizerActive by remember { mutableStateOf(false) }
@@ -157,15 +158,29 @@ fun WatchScreen(
         comments = null; commentList = emptyList(); showDesc = false
         // Re-opening the video that is already playing (from the mini player): keep it going.
         val cur = PlayerHolder.current.value
-        if (cur != null && cur.video.id == videoId) { details = cur; selectedSubtitleTrack = cur.subtitles.firstOrNull(); return@LaunchedEffect }
+        if (cur != null && cur.video.id == videoId) {
+            details = cur
+            val selection = PlayerHolder.currentSubtitleSelection
+            selectedSubtitleTrack = cur.subtitles.firstOrNull { it.url == selection.sourceUrl } ?: cur.subtitles.firstOrNull()
+            translationEnabled = selection.targetLanguage != null
+            translationTarget = selection.targetLanguage ?: translationTarget
+            captionsEnabled = PlayerHolder.subtitlesEnabled
+            return@LaunchedEffect
+        }
         details = null
         runCatching { Graph.repo.details(videoId) }
             .onSuccess { d ->
                 details = d
                 selectedSubtitleTrack = d.subtitles.firstOrNull()
                 Graph.store.addHistory(d.video)
-                runCatching { PlayerHolder.play(d, startMs = Graph.store.positionOf(videoId)) }
-                    .onFailure { error = errorText(it) }
+                runCatching {
+                    PlayerHolder.play(d, startMs = Graph.store.positionOf(videoId))
+                    val selection = PlayerHolder.currentSubtitleSelection
+                    selectedSubtitleTrack = d.subtitles.firstOrNull { it.url == selection.sourceUrl } ?: d.subtitles.firstOrNull()
+                    translationEnabled = selection.targetLanguage != null
+                    translationTarget = selection.targetLanguage ?: translationTarget
+                    captionsEnabled = PlayerHolder.subtitlesEnabled
+                }.onFailure { error = errorText(it) }
             }
             .onFailure { error = errorText(it) }
     }
@@ -565,15 +580,20 @@ fun WatchScreen(
                         val position = PlayerHolder.player.currentPosition
                         val wasPlaying = PlayerHolder.player.playWhenReady
                         runCatching {
+                            PlayerHolder.setSubtitleSelection(
+                                SubtitleSelection(
+                                    sourceUrl = selectedSubtitleTrack?.url,
+                                    targetLanguage = translationTarget.takeIf { translationEnabled },
+                                )
+                            )
+                            PlayerHolder.setSubtitlesEnabled(true)
                             PlayerHolder.play(
                                 dd,
                                 wantedHeight = height.takeIf { it > 0 } ?: PlayerHolder.defaultHeight(dd),
                                 startMs = position,
                                 audioTrackId = audioSel,
-                                subtitleSourceUrl = selectedSubtitleTrack?.url,
-                                subtitleTargetLanguage = translationTarget.takeIf { translationEnabled },
                             )
-                            PlayerHolder.setSubtitlesEnabled(captionsEnabled)
+                            captionsEnabled = true
                             if (!wasPlaying) PlayerHolder.player.pause()
                         }.onFailure { error = errorText(it) }
                         subtitleSheet = false
