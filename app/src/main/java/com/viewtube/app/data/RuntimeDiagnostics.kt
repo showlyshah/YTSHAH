@@ -147,7 +147,10 @@ object RuntimeDiagnostics {
             }
         }
         if (events.length() == 0) out.appendLine("No runtime events recorded.")
-        out.appendLine("===== END OF REPORT =====")
+        out.appendLine()
+            .appendLine("===== DETAILED HOME & SHORTS FEED DIAGNOSTICS =====")
+            .appendLine(runCatching { FeedDiagnostics.report() }.getOrElse { "Feed diagnostic report unavailable: ${it.message}" })
+            .appendLine("===== END OF REPORT =====")
         return out.toString()
     }
 
