@@ -28,6 +28,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Slider
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -135,6 +136,8 @@ fun WatchScreen(
     val repeatMode by PlayerHolder.repeatMode.collectAsStateCompat()
     val sleepRemaining by PlayerHolder.sleepRemainingMs.collectAsStateCompat()
     val audioOnly by PlayerHolder.audioOnly.collectAsStateCompat()
+    val equalizerEnabled by PlayerHolder.equalizerEnabled.collectAsStateCompat()
+    val equalizerBands by PlayerHolder.equalizerBands.collectAsStateCompat()
     val prefHeight by Graph.store.preferredHeight.collectAsStateCompat()
     val prefAudioBitrate by Graph.store.preferredAudioBitrate.collectAsStateCompat()
     val height by PlayerHolder.height.collectAsStateCompat()
@@ -508,6 +511,46 @@ fun WatchScreen(
             translationError?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
+            }
+            SheetTitle("Audio equalizer")
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Equalizer", fontWeight = FontWeight.Medium)
+                    Text(
+                        if (equalizerBands.isEmpty()) "Waiting for audio session" else "${equalizerBands.size}-band device equalizer",
+                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = equalizerEnabled, onCheckedChange = { PlayerHolder.setEqualizerEnabled(it) })
+            }
+            if (equalizerBands.isNotEmpty()) {
+                equalizerBands.forEachIndexed { index, level ->
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 2.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Band ${index + 1}", modifier = Modifier.weight(1f), fontSize = 12.sp)
+                            Text("${level} mB", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Slider(
+                            value = level.toFloat(),
+                            onValueChange = { PlayerHolder.setEqualizerBand(index, it.toInt()) },
+                            valueRange = PlayerHolder.equalizerBandRange.first.toFloat()..PlayerHolder.equalizerBandRange.last.toFloat(),
+                            enabled = equalizerEnabled
+                        )
+                    }
+                }
+                OutlinedButton(
+                    onClick = { equalizerBands.indices.forEach { PlayerHolder.setEqualizerBand(it, 0) } },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)
+                ) { Text("Reset equalizer") }
+            } else {
+                Text(
+                    "The equalizer becomes available when the device creates an audio session. Some devices or audio routes may not expose a compatible equalizer.",
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             SheetTitle("Playback mode")
             listOf("off" to "Play one", "one" to "Repeat one", "continuous" to "Play continuously").forEach { (mode, label) ->
