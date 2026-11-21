@@ -107,6 +107,7 @@ fun WatchScreen(
     var sheet by remember { mutableStateOf(false) }
     val audioSel by PlayerHolder.audioTrack.collectAsStateCompat()
     val audioBitrate by PlayerHolder.audioBitrate.collectAsStateCompat()
+    val audioOnly by PlayerHolder.audioOnly.collectAsStateCompat()
     val speed by PlayerHolder.speed.collectAsStateCompat()
     val prefHeight by Graph.store.preferredHeight.collectAsStateCompat()
     val height by PlayerHolder.height.collectAsStateCompat()
@@ -183,6 +184,7 @@ fun WatchScreen(
                 update = { view -> view.player = PlayerHolder.player; view.resizeMode = resizeMode },
                 modifier = Modifier.fillMaxSize()
             )
+            if (audioOnly) Text("AUDIO ONLY", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Center).clip(RoundedCornerShape(8.dp)).background(Color(0xAA000000)).padding(horizontal = 12.dp, vertical = 7.dp))
             if (!fullscreen) IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart)) {
                 Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Minimize", tint = Color.White)
             }
@@ -308,6 +310,14 @@ fun WatchScreen(
     val dd = details
     if (sheet && dd != null) ModalBottomSheet(onDismissRequest = { sheet = false }) {
         Column(Modifier.padding(bottom = 24.dp)) {
+            if (dd.audio.isNotEmpty() && !dd.isLive) {
+                SheetTitle("Playback mode")
+                SheetRow(if (audioOnly) "Audio only" else "Video + audio", audioOnly) {
+                    runCatching { PlayerHolder.play(dd, height.takeIf { it > 0 } ?: PlayerHolder.defaultHeight(dd), audioOnly = !audioOnly) }
+                        .onFailure { error = errorText(it) }
+                    sheet = false
+                }
+            }
             SheetTitle("Quality")
             val heights = PlayerHolder.heights(dd)
             SheetRow("Auto (recommended)", prefHeight == 0) {
