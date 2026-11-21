@@ -74,7 +74,7 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
-        runCatching { Graph.repo.shorts() }
+        runCatching { Graph.repo.shorts(Graph.store.subs.value.map { it.url }) }
             .onSuccess { page ->
                 videos = page.items.distinctBy { it.id }
                 nextPage = page.next
