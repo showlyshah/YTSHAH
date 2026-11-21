@@ -101,8 +101,12 @@ class YouTubeRepo(private val http: OkHttpClient) {
             async(Dispatchers.IO) {
                 val started = android.os.SystemClock.elapsedRealtime()
                 val result = runCatching { search(query, FILTER_VIDEOS).items.filterIsInstance<VideoItem>() }
-                result.onSuccess { FeedDiagnostics.record("home", "trending:$query", if (it.isEmpty()) "empty" else "success",
-                    android.os.SystemClock.elapsedRealtime() - started, it.size) }
+                result.onSuccess {
+                    FeedDiagnostics.record("home", "trending:$query", if (it.isEmpty()) "empty" else "success",
+                        android.os.SystemClock.elapsedRealtime() - started, it.size)
+                    RuntimeDiagnostics.record("EXTRACTOR", "home-trending-source", if (it.isEmpty()) "empty" else "success",
+                        "query=$query, durationMs=${android.os.SystemClock.elapsedRealtime() - started}, videos=${it.size}")
+                }
                     .onFailure { if (it is CancellationException) throw it; FeedDiagnostics.record("home", "trending:$query", "failure",
                         android.os.SystemClock.elapsedRealtime() - started, error = it) }
                 result.getOrDefault(emptyList())
@@ -126,6 +130,8 @@ class YouTubeRepo(private val http: OkHttpClient) {
                     FeedDiagnostics.record("shorts", "search:$query", if (count == 0) "empty" else "success",
                         android.os.SystemClock.elapsedRealtime() - started, count,
                         detail = "rawItems=${page.items.size}, hasContinuation=${page.next != null}")
+                    RuntimeDiagnostics.record("EXTRACTOR", "shorts-search-source", if (count == 0) "empty" else "success",
+                        "query=$query, durationMs=${android.os.SystemClock.elapsedRealtime() - started}, rawItems=${page.items.size}, videos=$count, continuation=${page.next != null}")
                 }.onFailure {
                     if (it is CancellationException) throw it
                     FeedDiagnostics.record("shorts", "search:$query", "failure",
@@ -165,10 +171,18 @@ class YouTubeRepo(private val http: OkHttpClient) {
                 gate.withPermit {
                     val started = android.os.SystemClock.elapsedRealtime()
                     val result = runCatching { channelShorts(url) }
-                    result.onSuccess { FeedDiagnostics.record("shorts", "channel-tab", if (it.items.isEmpty()) "empty" else "success",
-                        android.os.SystemClock.elapsedRealtime() - started, it.items.size, detail = "channelUrl=[redacted]") }
-                        .onFailure { if (it is CancellationException) throw it; FeedDiagnostics.record("shorts", "channel-tab", "failure",
-                            android.os.SystemClock.elapsedRealtime() - started, error = it, detail = "channelUrl=[redacted]") }
+                    result.onSuccess {
+                        FeedDiagnostics.record("shorts", "channel-tab", if (it.items.isEmpty()) "empty" else "success",
+                            android.os.SystemClock.elapsedRealtime() - started, it.items.size, detail = "channelUrl=[redacted]")
+                        RuntimeDiagnostics.record("EXTRACTOR", "shorts-channel-tab", if (it.items.isEmpty()) "empty" else "success",
+                            "durationMs=${android.os.SystemClock.elapsedRealtime() - started}, videos=${it.items.size}, continuation=${it.next != null}, channel=${RuntimeDiagnostics.safeUrl(url)}")
+                    }.onFailure {
+                        if (it is CancellationException) throw it
+                        FeedDiagnostics.record("shorts", "channel-tab", "failure",
+                            android.os.SystemClock.elapsedRealtime() - started, error = it, detail = "channelUrl=[redacted]")
+                        RuntimeDiagnostics.record("EXTRACTOR", "shorts-channel-tab", "failure",
+                            "durationMs=${android.os.SystemClock.elapsedRealtime() - started}, channel=${RuntimeDiagnostics.safeUrl(url)}", it)
+                    }
                     result.getOrNull()
                 }
             }
