@@ -94,6 +94,9 @@ object FeedDiagnostics {
     }
 
     private fun sanitize(value: String): String = value
-        .replace(Regex("(?i)(authorization|cookie|token|api[_-]?key|password)=?[^\\s,;]*"), "$1=[REDACTED]")
+        .replace(Regex("(?i)(authorization|cookie|token|api[_-]?key|password)=?[^\\s,;]*"), "${'
+        .replace(Regex("https?://[^\\s]+"), "[URL]")
+}
+}1=[REDACTED]")
         .replace(Regex("https?://[^\\s]+"), "[URL]")
 }
