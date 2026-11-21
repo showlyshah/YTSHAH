@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.viewtube.app.data.ChannelItem
 import com.viewtube.app.data.Graph
+import com.viewtube.app.data.FeedDiagnostics
 import com.viewtube.app.data.Item
 import com.viewtube.app.data.LocalRecommendationEngine
 import com.viewtube.app.data.Paged
@@ -115,27 +116,46 @@ fun HomeScreen(
         // the entire home screen behind a long sequential chain of requests.
         val (trending, fromSubs, discovery) = coroutineScope {
             val trendingTask = async {
-                runCatching { withTimeout(15_000) { Graph.repo.trending() } }
-                    .getOrDefault(emptyList())
+                val started = android.os.SystemClock.elapsedRealtime()
+                val result = runCatching { withTimeout(15_000) { Graph.repo.trending() } }
+                result.onSuccess { FeedDiagnostics.record("home", "trending-search", if (it.isEmpty()) "empty" else "success", android.os.SystemClock.elapsedRealtime() - started, it.size) }
+                    .onFailure { FeedDiagnostics.record("home", "trending-search", "failure", android.os.SystemClock.elapsedRealtime() - started, error = it) }
+                result.getOrDefault(emptyList())
             }
             val subscriptionsTask = async {
-                if (subIds.isEmpty()) emptyList()
-                else runCatching { withTimeout(15_000) { Graph.repo.feed(subIds, 3).take(24) } }
-                    .getOrDefault(emptyList())
+                if (subIds.isEmpty()) {
+                    FeedDiagnostics.record("home", "subscriptions-rss", "skipped", detail = "No subscribed channels")
+                    emptyList()
+                } else {
+                    val started = android.os.SystemClock.elapsedRealtime()
+                    val result = runCatching { withTimeout(15_000) { Graph.repo.feed(subIds, 3).take(24) } }
+                    result.onSuccess { FeedDiagnostics.record("home", "subscriptions-rss", if (it.isEmpty()) "empty" else "success", android.os.SystemClock.elapsedRealtime() - started, it.size, detail = "${subIds.size} channels") }
+                        .onFailure { FeedDiagnostics.record("home", "subscriptions-rss", "failure", android.os.SystemClock.elapsedRealtime() - started, error = it, detail = "${subIds.size} channels") }
+                    result.getOrDefault(emptyList())
+                }
             }
             val discoveryTask = async {
-                runCatching { withTimeout(20_000) { nextMixer.more(18) } }
-                    .getOrDefault(emptyList())
+                val started = android.os.SystemClock.elapsedRealtime()
+                val result = runCatching { withTimeout(20_000) { nextMixer.more(18) } }
+                result.onSuccess { FeedDiagnostics.record("home", "topic-discovery", if (it.isEmpty()) "empty" else "success", android.os.SystemClock.elapsedRealtime() - started, it.size) }
+                    .onFailure { FeedDiagnostics.record("home", "topic-discovery", "failure", android.os.SystemClock.elapsedRealtime() - started, error = it) }
+                result.getOrDefault(emptyList())
             }
             Triple(trendingTask.await(), subscriptionsTask.await(), discoveryTask.await())
         }
         var initial = (fromSubs + trending + discovery).distinctBy { it.id }
         // Last-resort fallback uses the same unfiltered search path as the working Search screen.
         if (initial.isEmpty()) {
-            initial = runCatching {
+            val started = android.os.SystemClock.elapsedRealtime()
+            val fallback = runCatching {
                 withTimeout(18_000) { Graph.repo.search("popular").items.filterIsInstance<VideoItem>() }
-            }.getOrDefault(emptyList())
+            }
+            fallback.onSuccess { FeedDiagnostics.record("home", "popular-search-fallback", if (it.isEmpty()) "empty" else "success", android.os.SystemClock.elapsedRealtime() - started, it.size) }
+                .onFailure { FeedDiagnostics.record("home", "popular-search-fallback", "failure", android.os.SystemClock.elapsedRealtime() - started, error = it) }
+            initial = fallback.getOrDefault(emptyList())
         }
+        FeedDiagnostics.record("home", "initial-feed", if (initial.isEmpty()) "empty" else "success", itemCount = initial.size,
+            detail = "subscriptions=${fromSubs.size}, trending=${trending.size}, discovery=${discovery.size}")
         videos = if (personalized) LocalRecommendationEngine.rank(initial, Graph.store.history.value, subs) else initial
         hasMore = !nextMixer.exhausted
         if (videos.isEmpty()) error = "The feed sources did not return videos. Check your connection and try again."
@@ -149,8 +169,10 @@ fun HomeScreen(
         scope.launch {
             loadingMore = true
             loadMoreFailed = false
+            val started = android.os.SystemClock.elapsedRealtime()
             val result = runCatching { activeMixer.more(14) }
             result.onSuccess { page ->
+                FeedDiagnostics.record("home", "next-page", if (page.isEmpty()) "empty" else "success", android.os.SystemClock.elapsedRealtime() - started, page.size)
                 if (page.isNotEmpty()) {
                     val known = videos.mapTo(HashSet()) { it.id }
                     val merged = videos + page.filter { known.add(it.id) }
@@ -161,6 +183,7 @@ fun HomeScreen(
                 }
                 hasMore = !activeMixer.exhausted
             }.onFailure {
+                FeedDiagnostics.record("home", "next-page", "failure", android.os.SystemClock.elapsedRealtime() - started, error = it)
                 loadMoreFailed = true
                 error = errorText(it)
             }
