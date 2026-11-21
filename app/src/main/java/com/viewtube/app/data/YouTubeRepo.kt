@@ -115,114 +115,271 @@ class YouTubeRepo(private val http: OkHttpClient) {
      * working Search screen. Unfiltered searches can return channel/playlist-only pages
      * after YouTube's renderer changes, leaving the home feed empty.
      */
-    suspend fun trending(): List<VideoItem> = coroutineScope {
-        // Request video-only renderers from YouTube instead of extracting mixed result types.
-        listOf("popular", "trending", "viral videos").map { query ->
-            async(Dispatchers.IO) {
-                val started = android.os.SystemClock.elapsedRealtime()
-                val result = runCatching { search(query, FILTER_VIDEOS).items.filterIsInstance<VideoItem>() }
-                result.onSuccess {
-                    FeedDiagnostics.record("home", "trending:$query", if (it.isEmpty()) "empty" else "success",
-                        android.os.SystemClock.elapsedRealtime() - started, it.size)
-                    RuntimeDiagnostics.record("EXTRACTOR", "home-trending-source", if (it.isEmpty()) "empty" else "success",
-                        "query=$query, durationMs=${android.os.SystemClock.elapsedRealtime() - started}, videos=${it.size}")
-                }
-                    .onFailure { if (it is CancellationException) throw it; FeedDiagnostics.record("home", "trending:$query", "failure",
-                        android.os.SystemClock.elapsedRealtime() - started, error = it) }
-                result.getOrDefault(emptyList())
-            }
-        }.awaitAll().flatten().distinctBy { it.id }
+    suspend fun trending(): List<VideoItem> = io {
+        val ex = yt.kioskList.defaultKioskExtractor
+        ex.fetchPage()
+        ex.initialPage.items.filterIsInstance<StreamInfoItem>().mapNotNull { it.toVideo() }
     }
 
-    /**
-     * Shorts discovery has independent video-search and channel-tab sources. It must not
-     * depend on trending succeeding or on the user already having subscriptions.
+    // ----------------------------------------------------------------- video
+
+    suspend fun details(id: String): VideoDetails = io {
+        val info = StreamInfo.getInfo(yt, watchUrl(id))
+        val chUrl = info.uploaderUrl.orEmpty()
+        val channel = ChannelItem(
+            id = chUrl.substringAfterLast('/'),
+            url = chUrl,
+            name = info.uploaderName.orEmpty(),
+            avatar = info.uploaderAvatars.pick(96),
+            subscribers = info.uploaderSubscriberCount,
+        )
+        val live = info.streamType == StreamType.LIVE_STREAM ||
+            info.streamType == StreamType.AUDIO_LIVE_STREAM
+        VideoDetails(
+            video = VideoItem(
+                id = id,
+                title = info.name.orEmpty(),
+                channelName = channel.name,
+                channelUrl = chUrl.ifBlank { null },
+                channelAvatar = channel.avatar,
+                thumbnail = info.thumbnails.pick(360),
+                durationSec = info.duration,
+                views = info.viewCount,
+                publishedText = info.textualUploadDate,
+                isLive = live,
+            ),
+            description = descText(info.description),
+            likes = info.likeCount,
+            channel = channel,
+            isLive = live,
+            hlsUrl = info.hlsUrl?.ifBlank { null },
+            muxed = info.videoStreams.orEmpty(),
+            videoOnly = info.videoOnlyStreams.orEmpty(),
+            audio = info.audioStreams.orEmpty(),
+            related = info.relatedItems.orEmpty().filterIsInstance<StreamInfoItem>().mapNotNull { it.toVideo() },
+        )
+    }
+
+    // -------------------------------------------------------------- comments
+
+    suspend fun comments(id: String): Paged<Comment> = io {
+        val url = watchUrl(id)
+        runCatching { CommentsInfo.getInfo(yt, url) }
+            .map { info -> commentsPaged(url, info.relatedItems, info.nextPage) }
+            .getOrElse { Paged(emptyList(), null) } // comments switched off, or failed to load
+    }
+
+    private fun commentsPaged(
+        url: String,
+        items: List<org.schabi.newpipe.extractor.comments.CommentsInfoItem>,
+        next: Page?,
+    ): Paged<Comment> = Paged(
+        items.map {
+            Comment(
+                author = it.uploaderName.orEmpty(),
+                avatar = it.uploaderAvatars.pick(48),
+                text = descText(it.commentText),
+                likes = it.likeCount,
+                published = it.textualUploadDate,
+                pinned = it.isPinned,
+                replies = it.replyCount,
+            )
+        },
+        next?.let { n ->
+            suspend {
+                io {
+                    val p = CommentsInfo.getMoreItems(yt, url, n)
+                    commentsPaged(url, p.items, p.nextPage)
+                }
+            }
+        }
+    )
+
+    // --------------------------------------------------------------- channel
+
+    suspend fun channel(url: String): ChannelPage = io {
+        val info = ChannelInfo.getInfo(yt, url)
+        val ch = ChannelItem(
+            id = info.id.orEmpty(),
+            url = info.url.orEmpty(),
+            name = info.name.orEmpty(),
+            avatar = info.avatars.pick(160),
+            banner = info.banners.pick(280),
+            subscribers = info.subscriberCount,
+            description = info.description,
+        )
+        val tab = info.tabs.firstOrNull { "videos" in it.contentFilters }
+        val videos = if (tab == null) {
+            Paged(emptyList(), null)
+        } else {
+            val first = ChannelTabInfo.getInfo(yt, tab)
+            tabPaged(tab, ch, first.relatedItems, first.nextPage)
+        }
+        ChannelPage(ch, videos)
+    }
+
+    private fun tabPaged(tab: ListLinkHandler, ch: ChannelItem, items: List<InfoItem>, next: Page?): Paged<VideoItem> =
+        Paged(
+            items.filterIsInstance<StreamInfoItem>().mapNotNull { it.toVideo(ch) },
+            next?.let { n ->
+                suspend {
+                    io {
+                        val p = ChannelTabInfo.getMoreItems(yt, tab, n)
+                        tabPaged(tab, ch, p.items, p.nextPage)
+                    }
+                }
+            }
+        )
+
+    // ------------------------------------------------- subscription feed (RSS)
+
+    /** Latest uploads from the given channels, newest first, using YouTube's public RSS feeds. */
+    suspend fun feed(channelIds: List<String>, perChannel: Int = 6): List<VideoItem> = coroutineScope {
+        val gate = Semaphore(8)
+        channelIds
+            .map { id ->
+                async(Dispatchers.IO) {
+                    gate.withPermit { runCatching { rss(id, perChannel) }.getOrDefault(emptyList()) }
+                }
+            }
+            .awaitAll()
+            .flatten()
+            .sortedByDescending { it.publishedMs }
+    }
+
+    private fun rss(channelId: String, limit: Int): List<VideoItem> {
+        val req = Request.Builder()
+            .url("https://www.youtube.com/feeds/videos.xml?channel_id=$channelId")
+            .header("User-Agent", DownloaderImpl.USER_AGENT)
+            .build()
+        http.newCall(req).execute().use { r ->
+            if (!r.isSuccessful) return emptyList()
+            return parseAtom(r.body?.string().orEmpty(), channelId, limit)
+        }
+    }
+
+    private fun parseAtom(xml: String, channelId: String, limit: Int): List<VideoItem> {
+        val p = Xml.newPullParser()
+        p.setInput(StringReader(xml))
+        val out = mutableListOf<VideoItem>()
+        var inEntry = false
+        var inAuthor = false
+        var id: String? = null
+        var title = ""
+        var author = ""
+        var published = 0L
+        var thumb: String? = null
+        var views = -1L
+
+        var ev = p.eventType
+        while (ev != XmlPullParser.END_DOCUMENT && out.size < limit) {
+            if (ev == XmlPullParser.START_TAG) {
+                when (p.name) {
+                    "entry" -> { inEntry = true; id = null; title = ""; published = 0; thumb = null; views = -1 }
+                    "author" -> inAuthor = true
+                    "yt:videoId" -> if (inEntry) id = p.nextText()
+                    "title" -> if (inEntry) title = p.nextText()
+                    "name" -> if (inEntry && inAuthor) author = p.nextText()
+                    "published" -> if (inEntry) {
+                        published = runCatching { OffsetDateTime.parse(p.nextText()).toInstant().toEpochMilli() }
+                            .getOrDefault(0L)
+                    }
+                    "media:thumbnail" -> if (inEntry) thumb = p.getAttributeValue(null, "url")
+                    "media:statistics" -> if (inEntry) {
+                        views = p.getAttributeValue(null, "views")?.toLongOrNull() ?: -1
+                    }
+                }
+            } else if (ev == XmlPullParser.END_TAG) {
+                when (p.name) {
+                    "author" -> inAuthor = false
+                    "entry" -> {
+                        inEntry = false
+                        id?.let {
+                            out += VideoItem(
+                                id = it, title = title, channelName = author,
+                                channelUrl = channelUrl(channelId), channelAvatar = null,
+                                thumbnail = thumb ?: "https://i.ytimg.com/vi/$it/hqdefault.jpg",
+                                views = views, publishedMs = published,
+                            )
+                        }
+                    }
+                }
+            }
+            ev = p.next()
+        }
+        return out
+    }
+
+    // --------------------------------------------------------------- mapping
+
+    private fun InfoItem.toItem(): Item? = when (this) {
+        is StreamInfoItem -> toVideo()
+        is ChannelInfoItem -> ChannelItem(
+            id = url.substringAfterLast('/'),
+            url = url,
+            name = name.orEmpty(),
+            avatar = thumbnails.pick(96),
+            subscribers = subscriberCount,
+            description = description,
+        )
+        else -> null // playlists are not shown
+    }
+
+    private fun StreamInfoItem.toVideo(fallback: ChannelItem? = null): VideoItem? {
+        val id = videoIdFromUrl(url) ?: return null
+        return VideoItem(
+            id = id,
+            title = name.orEmpty(),
+            channelName = uploaderName?.ifBlank { null } ?: fallback?.name.orEmpty(),
+            channelUrl = uploaderUrl?.ifBlank { null } ?: fallback?.url,
+            channelAvatar = uploaderAvatars.pick(48) ?: fallback?.avatar,
+            thumbnail = thumbnails.pick(360),
+            durationSec = duration,
+            views = viewCount,
+            publishedText = textualUploadDate,
+            isLive = streamType == StreamType.LIVE_STREAM || streamType == StreamType.AUDIO_LIVE_STREAM,
+            isShort = isShortFormContent || url.contains("/shorts/"),
+        )
+    }
+
+    private fun List<Image>?.pick(minHeight: Int): String? {
+        if (isNullOrEmpty()) return null
+        return filter { it.height >= minHeight }.minByOrNull { it.height }?.url
+            ?: maxByOrNull { it.height }?.url
+    }
+
+    private fun descText(d: Description?): String {
+        if (d == null) return ""
+        return if (d.type == Description.HTML) {
+            HtmlCompat.fromHtml(d.content.orEmpty(), HtmlCompat.FROM_HTML_MODE_LEGACY).toString().trim()
+        } else d.content.orEmpty()
+    }
+}
+
+/**
+     * Shorts feed based on the approach used by YouFlow: fetch each channel's actual Shorts tab,
+     * not ordinary search results guessed to be Shorts from their duration or title.
+     *
+     * Subscription channels are preferred. On a fresh install, NewPipe's kiosk feed supplies a
+     * small set of channel seeds so the Shorts screen is not empty before the first subscription.
      */
     suspend fun shorts(seedChannelUrls: List<String> = emptyList()): Paged<VideoItem> = coroutineScope {
-        val started = android.os.SystemClock.elapsedRealtime()
-        RuntimeDiagnostics.record("EXTRACTOR", "shorts-discovery-start", "started", "seedChannels=${seedChannelUrls.size}")
-        val queryPages = listOf("shorts", "#shorts", "youtube shorts", "viral shorts").map { query ->
-            async(Dispatchers.IO) {
-                val started = android.os.SystemClock.elapsedRealtime()
-                val result = runCatching { search(query, FILTER_VIDEOS) }
-                result.onSuccess { page ->
-                    val count = page.items.filterIsInstance<VideoItem>().size
-                    FeedDiagnostics.record("shorts", "search:$query", if (count == 0) "empty" else "success",
-                        android.os.SystemClock.elapsedRealtime() - started, count,
-                        detail = "rawItems=${page.items.size}, hasContinuation=${page.next != null}")
-                    RuntimeDiagnostics.record("EXTRACTOR", "shorts-search-source", if (count == 0) "empty" else "success",
-                        "query=$query, durationMs=${android.os.SystemClock.elapsedRealtime() - started}, rawItems=${page.items.size}, videos=$count, continuation=${page.next != null}")
-                }.onFailure {
-                    if (it is CancellationException) throw it
-                    FeedDiagnostics.record("shorts", "search:$query", "failure",
-                        android.os.SystemClock.elapsedRealtime() - started, error = it)
-                }
-                result.getOrNull()
-            }
-        }.awaitAll().filterNotNull().map(::shortsSearchPage)
-
-        val directItems = queryPages.flatMap { it.items }
-        // Search results are supplemental; actual channel Shorts tabs remain an independent source.
-        val seededChannelUrls = (seedChannelUrls + directItems.mapNotNull { it.channelUrl })
-            .filter { it.isNotBlank() }.distinct()
-
-        val popular = if (seededChannelUrls.size < 4) {
-            val popularStarted = android.os.SystemClock.elapsedRealtime()
-            val popularResult = runCatching { trending() }
-            popularResult.onSuccess { FeedDiagnostics.record("shorts", "fallback-trending",
-                if (it.isEmpty()) "empty" else "success",
-                android.os.SystemClock.elapsedRealtime() - popularStarted, it.size) }
-                .onFailure { if (it is CancellationException) throw it; FeedDiagnostics.record("shorts", "fallback-trending", "failure",
-                    android.os.SystemClock.elapsedRealtime() - popularStarted, error = it) }
-            popularResult.getOrDefault(emptyList())
-        } else {
-            FeedDiagnostics.record("shorts", "fallback-trending", "skipped",
-                detail = "Enough subscription/search channels were found")
-            emptyList()
-        }
-        val channelUrls = (seededChannelUrls + popular.mapNotNull { it.channelUrl })
+        val subscribedUrls = Graph.store.subs.value.map { it.url }
+        var channelUrls = (seedChannelUrls + subscribedUrls)
             .filter { it.isNotBlank() }.distinct().take(8)
-        FeedDiagnostics.record("shorts", "fallback-channel-discovery", if (channelUrls.isEmpty()) "empty" else "started",
-            itemCount = channelUrls.size, detail = "seedChannels=${seedChannelUrls.size}, searchVideos=${directItems.size}")
-
-        val gate = Semaphore(4)
-        val channelPages = channelUrls.map { url ->
+        if (channelUrls.isEmpty()) {
+            channelUrls = runCatching { trending().mapNotNull { it.channelUrl }.distinct().take(8) }
+                .getOrDefault(emptyList())
+        }
+        val gate = Semaphore(3)
+        val pages = channelUrls.map { url ->
             async(Dispatchers.IO) {
                 gate.withPermit {
-                    val started = android.os.SystemClock.elapsedRealtime()
-                    val result = runCatching { channelShorts(url) }
-                    result.onSuccess {
-                        FeedDiagnostics.record("shorts", "channel-tab", if (it.items.isEmpty()) "empty" else "success",
-                            android.os.SystemClock.elapsedRealtime() - started, it.items.size, detail = "channelUrl=[redacted]")
-                        RuntimeDiagnostics.record("EXTRACTOR", "shorts-channel-tab", if (it.items.isEmpty()) "empty" else "success",
-                            "durationMs=${android.os.SystemClock.elapsedRealtime() - started}, videos=${it.items.size}, continuation=${it.next != null}, channel=${RuntimeDiagnostics.safeUrl(url)}")
-                    }.onFailure {
-                        if (it is CancellationException) throw it
-                        FeedDiagnostics.record("shorts", "channel-tab", "failure",
-                            android.os.SystemClock.elapsedRealtime() - started, error = it, detail = "channelUrl=[redacted]")
-                        RuntimeDiagnostics.record("EXTRACTOR", "shorts-channel-tab", "failure",
-                            "durationMs=${android.os.SystemClock.elapsedRealtime() - started}, channel=${RuntimeDiagnostics.safeUrl(url)}", it)
-                    }
-                    result.getOrNull()
+                    runCatching { channelShorts(url) }.getOrNull()
                 }
             }
         }.awaitAll().filterNotNull()
-
-        val combined = combineShortsPages(channelPages + queryPages)
-        FeedDiagnostics.record("shorts", "combined-discovery", if (combined.items.isEmpty()) "empty" else "success",
-            itemCount = combined.items.size, detail = "searchSources=${queryPages.size}, channelSources=${channelPages.size}")
-        RuntimeDiagnostics.record("EXTRACTOR", "shorts-discovery-result", if (combined.items.isEmpty()) "empty" else "success",
-            "durationMs=${android.os.SystemClock.elapsedRealtime() - started}, items=${combined.items.size}, searchSources=${queryPages.size}, channelSources=${channelPages.size}, continuation=${combined.next != null}")
-        combined
-    }
-
-    private fun shortsSearchPage(page: Paged<Item>): Paged<VideoItem> {
-        val shorts = page.items.filterIsInstance<VideoItem>()
-            .filter { it.isShort || it.durationSec in 1..180 }
-            .map { it.copy(isShort = true) }
-        return Paged(shorts, page.next?.let { next ->
-            suspend { shortsSearchPage(next()) }
-        })
+        combineShortsPages(pages)
     }
 
     private suspend fun channelShorts(url: String): Paged<VideoItem> = io {
@@ -260,7 +417,7 @@ class YouTubeRepo(private val http: OkHttpClient) {
         return Paged(items, next)
     }
 
-    // ----------------------------------------------------------------- video
+// ----------------------------------------------------------------- video
 
     suspend fun details(id: String): VideoDetails = io {
         val started = android.os.SystemClock.elapsedRealtime()
