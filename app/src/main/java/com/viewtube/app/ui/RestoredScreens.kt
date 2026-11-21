@@ -71,16 +71,22 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
     var loading by remember { mutableStateOf(true) }
     var loadingMore by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var reload by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(Unit) {
-        runCatching { Graph.repo.shorts(Graph.store.subs.value.map { it.url }) }
-            .onSuccess { page ->
-                videos = page.items.distinctBy { it.id }
-                nextPage = page.next
-                error = null
+    LaunchedEffect(reload) {
+        loading = true
+        error = null
+        videos = emptyList()
+        nextPage = null
+        runCatching {
+            kotlinx.coroutines.withTimeout(30_000) {
+                Graph.repo.shorts(Graph.store.subs.value.map { it.url })
             }
-            .onFailure { error = it.message ?: "Could not load Shorts." }
+        }.onSuccess { page ->
+            videos = page.items.distinctBy { it.id }
+            nextPage = page.next
+        }.onFailure { error = it.message ?: "Could not load Shorts. Check your connection and retry." }
         loading = false
     }
 
@@ -105,7 +111,11 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
         when {
             loading -> Loading()
             videos.isEmpty() && nextPage == null ->
-                Message("No Shorts found", error ?: "The source did not return any videos identified as Shorts.")
+                Message(
+                    if (error != null) "Couldn't load Shorts" else "No Shorts found",
+                    error ?: "The source did not return any videos identified as Shorts.",
+                    "Try again"
+                ) { reload++ }
             else -> LazyColumn(Modifier.fillMaxSize()) {
                 items(videos, key = { it.id }) { video ->
                     VideoCard(video, { onVideo(video) }, onChannel)
