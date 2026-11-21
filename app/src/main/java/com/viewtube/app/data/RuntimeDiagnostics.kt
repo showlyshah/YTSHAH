@@ -1,5 +1,7 @@
 package com.viewtube.app.data
 
+import android.app.ActivityManager
+import android.app.ApplicationExitInfo
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -29,8 +31,30 @@ object RuntimeDiagnostics {
 
     fun init(context: Context) {
         appContext = context.applicationContext
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val existing = runCatching { JSONArray(prefs.getString(KEY_EVENTS, "[]")) }.getOrDefault(JSONArray())
+        sequence.set(existing.optJSONObject(existing.length() - 1)?.optLong("seq") ?: 0L)
         record("APP", "process-start", "ok",
             "pid=${Process.myPid()}, process=${if (Build.VERSION.SDK_INT >= 28) android.app.Application.getProcessName() else "unknown"}")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            runCatching {
+                val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                manager.getHistoricalProcessExitReasons(context.packageName, 0, 5).forEach { exit ->
+                    val reason = when (exit.reason) {
+                        ApplicationExitInfo.REASON_ANR -> "ANR"
+                        ApplicationExitInfo.REASON_CRASH -> "CRASH"
+                        ApplicationExitInfo.REASON_CRASH_NATIVE -> "NATIVE_CRASH"
+                        ApplicationExitInfo.REASON_LOW_MEMORY -> "LOW_MEMORY"
+                        ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "RESOURCE_LIMIT"
+                        ApplicationExitInfo.REASON_USER_REQUESTED -> "USER_REQUESTED"
+                        ApplicationExitInfo.REASON_SIGNALED -> "SIGNALED"
+                        else -> "OTHER:${exit.reason}"
+                    }
+                    record("OS_EXIT_HISTORY", "previous-process-exit", reason,
+                        "timestamp=${exit.timestamp}, status=${exit.status}, importance=${exit.importance}, pssKb=${exit.pss}, rssKb=${exit.rss}, description=${exit.description.orEmpty()}")
+                }
+            }
+        }
     }
 
     fun record(
