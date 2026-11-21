@@ -164,8 +164,7 @@ object PlayerHolder {
             playable.filter { it.audioTrackType == null || it.audioTrackType?.name == "ORIGINAL" }.ifEmpty { playable }
         }
         val quality = if (bitrate > 0) original.firstOrNull { it.averageBitrate == bitrate } ?: original.maxByOrNull { it.averageBitrate } else null
-        return quality ?: original.filter { it.format == MediaFormat.M4A }.maxByOrNull { it.averageBitrate }
-            ?: original.maxByOrNull { it.averageBitrate }
+        return quality ?: original.maxByOrNull { it.averageBitrate }
     }
 
     /** Distinct audio bitrates available for the selected language, highest first. */
