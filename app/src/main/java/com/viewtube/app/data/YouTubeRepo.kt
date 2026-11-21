@@ -105,11 +105,15 @@ class YouTubeRepo(private val http: OkHttpClient) {
             }
         }.awaitAll().filterNotNull().map(::shortsSearchPage)
 
-        val popular = async(Dispatchers.IO) { runCatching { trending() }.getOrDefault(emptyList()) }
         val directItems = queryPages.flatMap { it.items }
-        val channelUrls = (seedChannelUrls + popular.await().mapNotNull { it.channelUrl } +
+        // Search results are the fast path. Do not wait for channel metadata when the
+        // dedicated Shorts queries already returned a useful first page.
+        if (directItems.size >= 6) return@coroutineScope combineShortsPages(queryPages)
+
+        val popular = runCatching { trending() }.getOrDefault(emptyList())
+        val channelUrls = (seedChannelUrls + popular.mapNotNull { it.channelUrl } +
             directItems.mapNotNull { it.channelUrl })
-            .filter { it.isNotBlank() }.distinct().take(20)
+            .filter { it.isNotBlank() }.distinct().take(8)
 
         val gate = Semaphore(4)
         val channelPages = channelUrls.map { url ->
