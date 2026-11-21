@@ -58,10 +58,21 @@ class YouTubeRepo(private val http: OkHttpClient) {
 
     /** [filter] is FILTER_VIDEOS or FILTER_CHANNELS, or null for everything. */
     suspend fun search(query: String, filter: String? = null): Paged<Item> = io {
-        val handler = if (filter == null) yt.searchQHFactory.fromQuery(query)
-        else yt.searchQHFactory.fromQuery(query, listOf(filter), "")
-        val info = SearchInfo.getInfo(yt, handler)
-        searchPaged(handler, info.relatedItems, info.nextPage)
+        val started = android.os.SystemClock.elapsedRealtime()
+        RuntimeDiagnostics.record("EXTRACTOR", "search-start", "started", "queryChars=${query.length}, filter=${filter ?: "all"}")
+        try {
+            val handler = if (filter == null) yt.searchQHFactory.fromQuery(query)
+            else yt.searchQHFactory.fromQuery(query, listOf(filter), "")
+            val info = SearchInfo.getInfo(yt, handler)
+            val page = searchPaged(handler, info.relatedItems, info.nextPage)
+            RuntimeDiagnostics.record("EXTRACTOR", "search-result", if (page.items.isEmpty()) "empty" else "success",
+                "durationMs=${android.os.SystemClock.elapsedRealtime() - started}, rawItems=${page.items.size}, videos=${page.items.count { it is VideoItem }}, hasContinuation=${page.next != null}")
+            page
+        } catch (t: Throwable) {
+            RuntimeDiagnostics.record("EXTRACTOR", "search-failed", "failure",
+                "durationMs=${android.os.SystemClock.elapsedRealtime() - started}, queryChars=${query.length}, filter=${filter ?: "all"}", t)
+            throw t
+        }
     }
 
     private fun searchPaged(handler: SearchQueryHandler, items: List<InfoItem>, next: Page?): Paged<Item> =
@@ -104,6 +115,8 @@ class YouTubeRepo(private val http: OkHttpClient) {
      * depend on trending succeeding or on the user already having subscriptions.
      */
     suspend fun shorts(seedChannelUrls: List<String> = emptyList()): Paged<VideoItem> = coroutineScope {
+        val started = android.os.SystemClock.elapsedRealtime()
+        RuntimeDiagnostics.record("EXTRACTOR", "shorts-discovery-start", "started", "seedChannels=${seedChannelUrls.size}")
         val queryPages = listOf("shorts", "#shorts", "youtube shorts", "viral shorts").map { query ->
             async(Dispatchers.IO) {
                 val started = android.os.SystemClock.elapsedRealtime()
@@ -164,6 +177,8 @@ class YouTubeRepo(private val http: OkHttpClient) {
         val combined = combineShortsPages(channelPages + queryPages)
         FeedDiagnostics.record("shorts", "combined-discovery", if (combined.items.isEmpty()) "empty" else "success",
             itemCount = combined.items.size, detail = "searchSources=${queryPages.size}, channelSources=${channelPages.size}")
+        RuntimeDiagnostics.record("EXTRACTOR", "shorts-discovery-result", if (combined.items.isEmpty()) "empty" else "success",
+            "durationMs=${android.os.SystemClock.elapsedRealtime() - started}, items=${combined.items.size}, searchSources=${queryPages.size}, channelSources=${channelPages.size}, continuation=${combined.next != null}")
         combined
     }
 
@@ -214,7 +229,17 @@ class YouTubeRepo(private val http: OkHttpClient) {
     // ----------------------------------------------------------------- video
 
     suspend fun details(id: String): VideoDetails = io {
-        val info = StreamInfo.getInfo(yt, watchUrl(id))
+        val started = android.os.SystemClock.elapsedRealtime()
+        RuntimeDiagnostics.record("EXTRACTOR", "video-details-start", "started", "videoId=$id")
+        val info = try {
+            StreamInfo.getInfo(yt, watchUrl(id))
+        } catch (t: Throwable) {
+            RuntimeDiagnostics.record("EXTRACTOR", "video-details-failed", "failure",
+                "videoId=$id, durationMs=${android.os.SystemClock.elapsedRealtime() - started}", t)
+            throw t
+        }
+        RuntimeDiagnostics.record("EXTRACTOR", "video-details-parsed", "success",
+            "videoId=$id, durationMs=${android.os.SystemClock.elapsedRealtime() - started}, videoStreams=${info.videoStreams.orEmpty().size}, videoOnlyStreams=${info.videoOnlyStreams.orEmpty().size}, audioStreams=${info.audioStreams.orEmpty().size}, related=${info.relatedItems.orEmpty().size}, live=${info.isLive}")
         val chUrl = info.uploaderUrl.orEmpty()
         val channel = ChannelItem(
             id = chUrl.substringAfterLast('/'),
@@ -288,7 +313,15 @@ class YouTubeRepo(private val http: OkHttpClient) {
     // --------------------------------------------------------------- channel
 
     suspend fun channel(url: String): ChannelPage = io {
-        val info = ChannelInfo.getInfo(yt, url)
+        val started = android.os.SystemClock.elapsedRealtime()
+        RuntimeDiagnostics.record("EXTRACTOR", "channel-start", "started", "url=${RuntimeDiagnostics.safeUrl(url)}")
+        val info = try {
+            ChannelInfo.getInfo(yt, url)
+        } catch (t: Throwable) {
+            RuntimeDiagnostics.record("EXTRACTOR", "channel-failed", "failure",
+                "durationMs=${android.os.SystemClock.elapsedRealtime() - started}", t)
+            throw t
+        }
         val ch = ChannelItem(
             id = info.id.orEmpty(),
             url = info.url.orEmpty(),
@@ -305,6 +338,8 @@ class YouTubeRepo(private val http: OkHttpClient) {
             val first = ChannelTabInfo.getInfo(yt, tab)
             tabPaged(tab, ch, first.relatedItems, first.nextPage)
         }
+        RuntimeDiagnostics.record("EXTRACTOR", "channel-result", if (videos.items.isEmpty()) "empty" else "success",
+            "durationMs=${android.os.SystemClock.elapsedRealtime() - started}, videos=${videos.items.size}, continuation=${videos.next != null}")
         ChannelPage(ch, videos)
     }
 
