@@ -24,6 +24,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -37,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.viewtube.app.data.Graph
 import com.viewtube.app.data.FeedDiagnostics
+import com.viewtube.app.data.RuntimeDiagnostics
 import com.viewtube.app.data.Paged
 import com.viewtube.app.data.VideoItem
 import com.viewtube.app.player.PlayerHolder
@@ -68,6 +70,10 @@ fun MiniPlayer(onOpen: (String) -> Unit) {
 
 @Composable
 fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
+    DisposableEffect(Unit) {
+        RuntimeDiagnostics.record("SHORTS_UI", "screen-enter", "ok")
+        onDispose { RuntimeDiagnostics.record("SHORTS_UI", "screen-dispose", "ok") }
+    }
     var videos by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
     var nextPage by remember { mutableStateOf<(suspend () -> Paged<VideoItem>)?>(null) }
     var loading by remember { mutableStateOf(true) }
@@ -77,6 +83,7 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(reload) {
+        RuntimeDiagnostics.record("SHORTS_UI", "initial-load", "started", "reload=$reload subscriptions=${Graph.store.subs.value.size}")
         loading = true
         error = null
         videos = emptyList()
@@ -89,6 +96,7 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
         }.onSuccess { page ->
             videos = page.items.distinctBy { it.id }
             nextPage = page.next
+            RuntimeDiagnostics.record("SHORTS_UI", "initial-load-results", if (videos.isEmpty()) "empty" else "success", "videos=${videos.size}, hasContinuation=${page.next != null}")
             FeedDiagnostics.record("shorts", "initial-feed", if (videos.isEmpty()) "empty" else "success",
                 android.os.SystemClock.elapsedRealtime() - started, videos.size,
                 detail = "hasContinuation=${page.next != null}")
@@ -96,21 +104,25 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
             if (it is CancellationException) throw it
             FeedDiagnostics.record("shorts", "initial-feed", "failure",
                 android.os.SystemClock.elapsedRealtime() - started, error = it)
+            RuntimeDiagnostics.record("SHORTS_UI", "initial-load", "failure", error = it)
             error = it.message ?: "Could not load Shorts. Check your connection and retry."
         }
         loading = false
+        RuntimeDiagnostics.record("SHORTS_UI", "initial-load-finished", if (videos.isEmpty()) "empty" else "success", "videos=${videos.size}, errorPresent=${error != null}")
     }
 
     fun loadMore() {
         val fetch = nextPage ?: return
         if (loadingMore) return
         scope.launch {
+            RuntimeDiagnostics.record("SHORTS_UI", "pagination-request", "started", "currentVideos=${videos.size}")
             loadingMore = true
             val started = android.os.SystemClock.elapsedRealtime()
             runCatching { fetch() }
                 .onSuccess { page ->
                     videos = (videos + page.items).distinctBy { it.id }
                     nextPage = page.next
+                    RuntimeDiagnostics.record("SHORTS_UI", "pagination-results", if (page.items.isEmpty()) "empty" else "success", "newItems=${page.items.size}, total=${videos.size}, hasContinuation=${page.next != null}")
                     FeedDiagnostics.record("shorts", "next-page", if (page.items.isEmpty()) "empty" else "success",
                         android.os.SystemClock.elapsedRealtime() - started, page.items.size,
                         detail = "total=${videos.size}, hasContinuation=${page.next != null}")
@@ -123,6 +135,7 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
                     error = it.message ?: "Could not load more Shorts."
                 }
             loadingMore = false
+            RuntimeDiagnostics.record("SHORTS_UI", "pagination-finished", if (error == null) "complete" else "failure", "totalVideos=${videos.size}")
         }
     }
 
