@@ -90,10 +90,13 @@ class YtDataSource(private val upstream: DataSource) : DataSource {
     private fun headersFor(uri: Uri): Map<String, String> {
         val url = uri.toString()
         return when {
-            Yt.isAndroidStreamingUrl(url) -> mapOf("User-Agent" to Yt.getAndroidUserAgent(null))
-            Yt.isIosStreamingUrl(url) -> mapOf("User-Agent" to Yt.getIosUserAgent(null))
             Yt.isVisionOsStreamingUrl(url) -> mapOf("User-Agent" to Yt.getVisionOsUserAgent(null))
-            Yt.isWebStreamingUrl(url) || Yt.isWebEmbeddedPlayerStreamingUrl(url) -> mapOf(
+            Yt.isWebStreamingUrl(url) -> mapOf(
+                "User-Agent" to DownloaderImpl.USER_AGENT,
+                "Origin" to "https://www.youtube.com",
+                "Referer" to "https://www.youtube.com",
+            )
+            uriHostIsGoogleVideo(url) -> mapOf(
                 "User-Agent" to DownloaderImpl.USER_AGENT,
                 "Origin" to "https://www.youtube.com",
                 "Referer" to "https://www.youtube.com",
@@ -101,6 +104,9 @@ class YtDataSource(private val upstream: DataSource) : DataSource {
             else -> emptyMap()
         }
     }
+
+    private fun uriHostIsGoogleVideo(url: String): Boolean =
+        runCatching { Uri.parse(url).host?.endsWith("googlevideo.com") == true }.getOrDefault(false)
 
     private companion object {
         const val CHUNK = 10L * 1024 * 1024
