@@ -14,9 +14,9 @@ class OnDeviceSubtitleTranslator private constructor(private val client: Transla
 
     companion object {
         suspend fun create(sourceTag: String, targetTag: String): OnDeviceSubtitleTranslator {
-            val source = TranslateLanguage.fromLanguageTag(sourceTag)
+            val source = TranslateLanguage.fromLanguageTag(java.util.Locale.forLanguageTag(sourceTag).language)
                 ?: throw IllegalArgumentException("Unsupported subtitle language: $sourceTag")
-            val target = TranslateLanguage.fromLanguageTag(targetTag)
+            val target = TranslateLanguage.fromLanguageTag(java.util.Locale.forLanguageTag(targetTag).language)
                 ?: throw IllegalArgumentException("Unsupported translation language: $targetTag")
             require(source != target) { "Subtitles are already in the selected language." }
             val client = Translation.getClient(
