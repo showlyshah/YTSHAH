@@ -3,6 +3,7 @@ package com.viewtube.app
 import android.app.Application
 import android.content.Context
 import android.os.Build
+import com.viewtube.app.data.RuntimeDiagnostics
 import java.io.File
 import java.io.PrintWriter
 import java.io.StringWriter
@@ -20,6 +21,7 @@ object CrashReportRecorder {
     fun install(application: Application) {
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            runCatching { RuntimeDiagnostics.record("CRASH", "uncaught-exception", "fatal", "thread=${thread.name}", throwable) }
             runCatching { write(application, thread, throwable) }
             if (previous != null) {
                 previous.uncaughtException(thread, throwable)
