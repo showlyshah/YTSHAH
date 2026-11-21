@@ -68,7 +68,7 @@ object PlayerHolder {
         }.getOrDefault(C.AUDIO_SESSION_ID_UNSET)
     }
     val audioSessionId: Int get() = generatedAudioSessionId
-    private var equalizerEffect: android.media.audiofx.Equalizer? = null
+    private var equalizerEffect: PegelEqualizer? = null
     val player: ExoPlayer by lazy { buildPlayer() }
 
     /** One persistent effect per ExoPlayer audio session; opening the EQ UI never recreates it. */
@@ -77,7 +77,7 @@ object PlayerHolder {
         val session = audioSessionId
         if (session <= 0) return
         equalizerEffect = runCatching {
-            android.media.audiofx.Equalizer(0, session).apply { enabled = true }
+            PegelEqualizer.create(session)
         }.onFailure { Graph.diagnostics.record("equalizer_init", it) }.getOrNull()
     }
 
