@@ -99,7 +99,10 @@ class YouTubeRepo(private val http: OkHttpClient) {
     ): Paged<VideoItem> = Paged(
         items.filterIsInstance<StreamInfoItem>()
             .mapNotNull { it.toVideo() }
-            .filter { it.isShort },
+            // Search results do not consistently carry NewPipe's Shorts flag.
+            // The dedicated Shorts query is the discovery signal; duration is a
+            // compatibility fallback for short-form results with missing metadata.
+            .filter { it.isShort || (!it.isLive && it.durationSec in 1L..180L) },
         next?.let { page ->
             suspend {
                 io {
