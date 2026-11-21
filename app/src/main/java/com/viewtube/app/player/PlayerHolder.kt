@@ -81,7 +81,7 @@ object PlayerHolder {
         }.onFailure { Graph.diagnostics.record("equalizer_init", it) }.getOrNull()
     }
 
-    fun getEqualizer(): android.media.audiofx.Equalizer? {
+    fun getEqualizer(): PegelEqualizer? {
         ensureEqualizer()
         return equalizerEffect
     }
