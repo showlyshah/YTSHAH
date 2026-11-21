@@ -195,6 +195,8 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
     }
 
     DisposableEffect(shortsPlayer) {
+        // A Short has its own isolated player; pause the regular player while the Shorts feed is open.
+        PlayerHolder.player.playWhenReady = false
         onDispose { shortsPlayer.stop() }
     }
 
