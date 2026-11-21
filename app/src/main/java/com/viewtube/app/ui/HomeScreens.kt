@@ -92,6 +92,7 @@ fun HomeScreen(
         onDispose { RuntimeDiagnostics.record("HOME_UI", "screen-dispose", "ok") }
     }
     val subs by Graph.store.subs.collectAsStateCompat()
+    val scope = rememberCoroutineScope()
     val personalized by Graph.store.personalizedRecommendations.collectAsStateCompat()
     val subIds = subs.map { it.id }
     val listState = rememberLazyListState()
