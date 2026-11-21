@@ -10,7 +10,7 @@ android {
 
     defaultConfig {
         applicationId = "com.viewtube.app"
-        minSdk = 29          // Android 10
+        minSdk = 26          // Android 8.0 (Oreo)
         targetSdk = 35       // raise once your Android Studio supports API 36/37
         versionCode = 1
         versionName = "1.0"
