@@ -76,20 +76,37 @@ class YouTubeRepo(private val http: OkHttpClient) {
     // -------------------------------------------------------------- trending
 
     suspend fun trending(): List<VideoItem> = io {
-        val ex = yt.kioskList.defaultKioskExtractor
-        ex.fetchPage()
-        ex.initialPage.items.filterIsInstance<StreamInfoItem>().mapNotNull { it.toVideo() }
+        // The default kiosk endpoint is unreliable in some regions. Keep it as the
+        // preferred source, but fall back to ordinary search (the same path used by
+        // the working Search screen) when it fails or returns no videos.
+        val kiosk = runCatching {
+            val ex = yt.kioskList.defaultKioskExtractor
+            ex.fetchPage()
+            ex.initialPage.items.filterIsInstance<StreamInfoItem>().mapNotNull { it.toVideo() }
+        }.getOrDefault(emptyList())
+        if (kiosk.isNotEmpty()) kiosk else {
+            val handler = yt.searchQHFactory.fromQuery("popular videos")
+            val info = SearchInfo.getInfo(yt, handler)
+            info.relatedItems.filterIsInstance<StreamInfoItem>().mapNotNull { it.toVideo() }
+        }
     }
 
     /**
-     * Shorts use a dedicated video search and strict extractor metadata filtering.
-     * Never fill an empty Shorts feed with ordinary trending videos: that made the
-     * Shorts tab look populated while showing the wrong content.
+     * Shorts discovery uses YouTube's #shorts query without NewPipe's optional
+     * search-filter endpoint. That filter has failed independently of normal search
+     * on some extractor/region combinations. The hashtag query is the discovery
+     * signal; do not reject results merely because the extractor omitted its Shorts flag.
      */
     suspend fun shorts(): Paged<VideoItem> = io {
-        val handler = yt.searchQHFactory.fromQuery("shorts", listOf(FILTER_VIDEOS), "")
-        val info = SearchInfo.getInfo(yt, handler)
-        shortsPaged(handler, info.relatedItems, info.nextPage)
+        val primary = yt.searchQHFactory.fromQuery("#shorts")
+        val first = SearchInfo.getInfo(yt, primary)
+        if (first.relatedItems.filterIsInstance<StreamInfoItem>().isNotEmpty()) {
+            shortsPaged(primary, first.relatedItems, first.nextPage)
+        } else {
+            val fallback = yt.searchQHFactory.fromQuery("shorts")
+            val info = SearchInfo.getInfo(yt, fallback)
+            shortsPaged(fallback, info.relatedItems, info.nextPage)
+        }
     }
 
     private fun shortsPaged(
@@ -99,10 +116,8 @@ class YouTubeRepo(private val http: OkHttpClient) {
     ): Paged<VideoItem> = Paged(
         items.filterIsInstance<StreamInfoItem>()
             .mapNotNull { it.toVideo() }
-            // Search results do not consistently carry NewPipe's Shorts flag.
-            // The dedicated Shorts query is the discovery signal; duration is a
-            // compatibility fallback for short-form results with missing metadata.
-            .filter { it.isShort || (!it.isLive && it.durationSec in 1L..180L) },
+            .filterNot { it.isLive }
+            .map { it.copy(isShort = true) },
         next?.let { page ->
             suspend {
                 io {
