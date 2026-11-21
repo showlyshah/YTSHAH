@@ -53,6 +53,7 @@ class PlaybackService : MediaSessionService() {
                 ): ListenableFuture<SessionResult> {
                     if (customCommand.customAction == ACTION_STOP) {
                         PlayerHolder.stop()
+                        stopForeground(STOP_FOREGROUND_REMOVE)
                         stopSelf()
                     }
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
@@ -73,6 +74,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        stopForeground(STOP_FOREGROUND_REMOVE)
         session?.release()
         session = null
         super.onDestroy()
