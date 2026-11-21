@@ -169,11 +169,6 @@ fun AccountScreen(onBack: () -> Unit) {
         }
     }
 
-    if (showAbout) {
-        AboutScreen(onBack = { showAbout = false })
-        return
-    }
-
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 32.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
@@ -486,6 +481,7 @@ fun AccountScreen(onBack: () -> Unit) {
         confirmButton = { TextButton(onClick = { Graph.piped.signOut(); store.wipeAll(); Graph.secure.clear(); confirmWipe = false; status = "All data deleted." }) { Text("Delete") } },
         dismissButton = { TextButton(onClick = { confirmWipe = false }) { Text("Cancel") } }
     )
+    if (showAbout) AboutScreen(onBack = { showAbout = false })
 }
 
 @Composable
