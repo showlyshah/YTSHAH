@@ -157,21 +157,31 @@ object PlayerHolder {
     }
 
     private fun advanceToNext(d: VideoDetails, onAdvanced: ((String) -> Unit)?, tag: String) {
-        val queued = Graph.store.queue.value.firstOrNull { it.id != d.video.id }
-        // When the viewer has opted into location, use the area as an additional discovery signal.
-        // YouTube's own related list remains the fallback, and the curated queue always wins.
-        val localRecommendation = LocationRecommendations.area?.let { area ->
-            runCatching {
-                Graph.repo.search("trending videos $area", FILTER_VIDEOS).items
-                    .filterIsInstance<VideoItem>()
-                    .firstOrNull { it.id != d.video.id && !Graph.store.isWatched(it.id) }
-            }.getOrNull()
-        }
-        val recommendation = localRecommendation
-            ?: d.related.firstOrNull { it.id != d.video.id && !Graph.store.isWatched(it.id) }
-            ?: d.related.firstOrNull { it.id != d.video.id }
-        val nextId = queued?.id ?: recommendation?.id ?: return
         scope.launch {
+            // A user-curated queue always takes priority over discovery.
+            val queued = Graph.store.queue.value.firstOrNull { it.id != d.video.id }
+
+            // Location-based discovery is optional and runs inside this coroutine because
+            // NewPipe's repository search is a suspending network operation.
+            val localRecommendation = if (queued == null) {
+                val area = LocationRecommendations.area
+                if (area.isNullOrBlank()) null else try {
+                    Graph.repo.search("trending videos $area", FILTER_VIDEOS).items
+                        .filterIsInstance<VideoItem>()
+                        .firstOrNull { it.id != d.video.id && !Graph.store.isWatched(it.id) }
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Graph.diagnostics.record("local_next_search", error)
+                    null
+                }
+            } else null
+
+            val recommendation = localRecommendation
+                ?: d.related.firstOrNull { it.id != d.video.id && !Graph.store.isWatched(it.id) }
+                ?: d.related.firstOrNull { it.id != d.video.id }
+            val nextId = queued?.id ?: recommendation?.id ?: return@launch
+
             runCatching {
                 val nextDetails = Graph.repo.details(nextId)
                 if (queued != null) Graph.store.removeFromQueue(nextId)
