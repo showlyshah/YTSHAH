@@ -1,5 +1,6 @@
 package com.viewtube.app.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,14 +18,17 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.NorthWest
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -36,7 +40,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,24 +48,25 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.viewtube.app.data.ChannelItem
-import com.viewtube.app.data.Graph
-import com.viewtube.app.data.RuntimeDiagnostics
 import com.viewtube.app.data.FILTER_VIDEOS
 import com.viewtube.app.data.FeedDiagnostics
+import com.viewtube.app.data.FeedMixer
+import com.viewtube.app.data.Graph
 import com.viewtube.app.data.Item
 import com.viewtube.app.data.LocalRecommendationEngine
 import com.viewtube.app.data.Paged
+import com.viewtube.app.data.RuntimeDiagnostics
 import com.viewtube.app.data.VideoItem
 import com.viewtube.app.data.errorText
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 
 /** Red play-button logo + name, like the YouTube app bar. */
 @Composable
 fun TopBar(onSearch: () -> Unit, onAccount: () -> Unit) {
-    val name by Graph.store.profileName.collectAsStateCompat()
     Row(
         Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -75,7 +79,36 @@ fun TopBar(onSearch: () -> Unit, onAccount: () -> Unit) {
         IconButton(onClick = onAccount) {
             Avatar(null, 30)
         }
-        if (name.isNotBlank()) Spacer(Modifier.width(0.dp))
+    }
+}
+
+private val CATEGORIES = listOf("All", "Music", "Gaming", "Live", "News", "Podcasts", "Movies", "Sports", "Cooking", "Learning", "Comedy")
+
+private fun topicsFor(category: String): List<String> {
+    if (category != "All") return listOf(category, "$category new", "$category popular", "best $category")
+    val store = Graph.store
+    val personal = (store.subs.value.shuffled().take(5).map { it.name } +
+        store.history.value.take(8).map { it.channelName }.distinct().take(4) +
+        store.searchHistory.value.take(3)).filter { it.isNotBlank() }
+    return personal + listOf("trending", "music", "gaming", "news today", "technology", "science", "movies trailers", "sports highlights")
+}
+
+@Composable
+fun CategoryChips(selected: String, onSelect: (String) -> Unit, items: List<String> = CATEGORIES) {
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+    ) {
+        items(items) { c ->
+            val on = c == selected
+            Text(
+                c, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                color = if (on) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                    .background(if (on) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.surfaceVariant)
+                    .clickable { onSelect(c) }.padding(horizontal = 12.dp, vertical = 7.dp)
+            )
+        }
     }
 }
 
@@ -87,203 +120,54 @@ fun HomeScreen(
     onVideo: (VideoItem) -> Unit,
     onChannel: (String) -> Unit,
 ) {
-    DisposableEffect(Unit) {
-        RuntimeDiagnostics.record("HOME_UI", "screen-enter", "ok")
-        onDispose { RuntimeDiagnostics.record("HOME_UI", "screen-dispose", "ok") }
-    }
-    val subs by Graph.store.subs.collectAsStateCompat()
     val scope = rememberCoroutineScope()
-    val personalized by Graph.store.personalizedRecommendations.collectAsStateCompat()
-    val subIds = subs.map { it.id }
-    val listState = rememberLazyListState()
+    val list = rememberLazyListState()
+    var category by remember { mutableStateOf("All") }
     var videos by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
+    var mixer by remember { mutableStateOf<FeedMixer?>(null) }
     var loading by remember { mutableStateOf(true) }
     var loadingMore by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
-    var hasMore by remember { mutableStateOf(true) }
-    var loadMoreFailed by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
-    var mixer by remember { mutableStateOf<com.viewtube.app.data.FeedMixer?>(null) }
 
-    LaunchedEffect(reload, subIds, personalized) {
-        RuntimeDiagnostics.record("HOME_UI", "initial-load", "started",
-            "reload=$reload subscriptions=${subIds.size} personalized=$personalized")
-        loading = true
-        loadingMore = false
-        loadMoreFailed = false
+    LaunchedEffect(category, reload) {
         error = null
-        videos = emptyList()
-        listState.scrollToItem(0)
+        if (!refreshing) { loading = true; videos = emptyList() }
+        val m = FeedMixer(topicsFor(category), Graph.repo) { !it.isShort && it.durationSec != 0L }
+        mixer = m
+        val subs = Graph.store.subs.value
+        val fromSubs = if (category == "All" && subs.isNotEmpty())
+            runCatching { Graph.repo.feed(subs.map { it.id }.shuffled().take(25), 2).take(12) }.getOrDefault(emptyList())
+        else emptyList()
+        val first = runCatching { m.more(12) }.getOrDefault(emptyList())
+        val all = (fromSubs + first).distinctBy { it.id }
+        if (all.isEmpty()) error = "No videos came back. Check your connection and try again."
+        videos = all
+        loading = false; refreshing = false
+    }
 
-        val nextMixer = com.viewtube.app.data.FeedMixer(
-            topics = listOf("popular", "music", "technology", "gaming", "science", "news", "education"),
-            repo = Graph.repo,
-            accept = { !it.isShort && !it.isLive },
-        )
-        mixer = nextMixer
-
-        // Match the proven feed pattern used by LibreTube/NewPipe: each source is
-        // independent, results are published as soon as that source completes, and
-        // the UI never waits for a slow source before starting the others.
-        var publishedAny = false
-        fun publish(items: List<VideoItem>, source: String) {
-            val merged = (videos + items).distinctBy { it.id }
-            videos = if (personalized) {
-                LocalRecommendationEngine.rank(merged, Graph.store.history.value, subs)
-            } else merged
-            if (videos.isNotEmpty()) {
-                publishedAny = true
-                error = null
-                loading = false
-            }
-            RuntimeDiagnostics.record(
-                "HOME_UI", "source-published",
-                if (items.isEmpty()) "empty" else "success",
-                "source=$source sourceItems=${items.size} displayedVideos=${videos.size}"
-            )
-        }
-
+    LoadMoreEffect(list, !loading && !loadingMore && mixer?.exhausted == false) {
+        val m = mixer ?: return@LoadMoreEffect
         loadingMore = true
-        kotlinx.coroutines.coroutineScope {
-            val trendingJob = launch {
-                val startedAt = android.os.SystemClock.elapsedRealtime()
-                try {
-                    val result = withTimeout(20_000) { Graph.repo.trending() }
-                    FeedDiagnostics.record("home", "trending-search",
-                        if (result.isEmpty()) "empty" else "success",
-                        android.os.SystemClock.elapsedRealtime() - startedAt, result.size)
-                    publish(result, "trending")
-                } catch (t: Throwable) {
-                    if (t is kotlinx.coroutines.CancellationException) throw t
-                    FeedDiagnostics.record("home", "trending-search", "failure",
-                        android.os.SystemClock.elapsedRealtime() - startedAt, error = t)
-                    RuntimeDiagnostics.record("HOME_UI", "trending-source", "failure", error = t)
-                }
-            }
-
-            val subscriptionsJob = launch {
-                val startedAt = android.os.SystemClock.elapsedRealtime()
-                try {
-                    val result = if (subIds.isEmpty()) emptyList()
-                    else withTimeout(20_000) { Graph.repo.feed(subIds, 3).take(24) }
-                    FeedDiagnostics.record("home", "subscriptions-rss",
-                        if (result.isEmpty()) "empty" else "success",
-                        android.os.SystemClock.elapsedRealtime() - startedAt, result.size,
-                        detail = "channels=${subIds.size}")
-                    publish(result, "subscriptions")
-                } catch (t: Throwable) {
-                    if (t is kotlinx.coroutines.CancellationException) throw t
-                    FeedDiagnostics.record("home", "subscriptions-rss", "failure",
-                        android.os.SystemClock.elapsedRealtime() - startedAt, error = t)
-                    RuntimeDiagnostics.record("HOME_UI", "subscriptions-source", "failure", error = t)
-                }
-            }
-
-            val discoveryJob = launch {
-                val startedAt = android.os.SystemClock.elapsedRealtime()
-                try {
-                    val result = withTimeout(30_000) { nextMixer.more(18) }
-                    FeedDiagnostics.record("home", "topic-discovery",
-                        if (result.isEmpty()) "empty" else "success",
-                        android.os.SystemClock.elapsedRealtime() - startedAt, result.size)
-                    publish(result, "topic-discovery")
-                } catch (t: Throwable) {
-                    if (t is kotlinx.coroutines.CancellationException) throw t
-                    FeedDiagnostics.record("home", "topic-discovery", "failure",
-                        android.os.SystemClock.elapsedRealtime() - startedAt, error = t)
-                    RuntimeDiagnostics.record("HOME_UI", "topic-discovery", "failure", error = t)
-                } finally {
-                    loadingMore = false
-                }
-            }
-
-            trendingJob.join()
-            subscriptionsJob.join()
-            discoveryJob.join()
-        }
-
-        hasMore = !nextMixer.exhausted
-        if (videos.isEmpty()) {
-            error = "No videos could be loaded right now. Check your connection and try again."
-        } else {
-            error = null
-        }
-        loading = false
-        loadingMore = false
-        refreshing = false
-        FeedDiagnostics.record("home", "initial-feed",
-            if (videos.isEmpty()) "empty" else "success",
-            itemCount = videos.size, detail = "parallelSources=true")
-        RuntimeDiagnostics.record("HOME_UI", "initial-load-finished",
-            if (videos.isEmpty()) "empty" else "success",
-            "displayedVideos=${videos.size} mixerExhausted=${nextMixer.exhausted} publishedAny=$publishedAny hasMore=$hasMore")
-    }
-
-    fun loadNextPage() {
-        if (loading || loadingMore || !hasMore) return
-        val activeMixer = mixer ?: return
         scope.launch {
-            RuntimeDiagnostics.record("HOME_UI", "pagination-request", "started", "currentVideos=${videos.size}")
-            loadingMore = true
-            loadMoreFailed = false
-            val started = android.os.SystemClock.elapsedRealtime()
-            val result = runCatching { activeMixer.more(14) }
-            result.onSuccess { page ->
-                FeedDiagnostics.record("home", "next-page", if (page.isEmpty()) "empty" else "success", android.os.SystemClock.elapsedRealtime() - started, page.size)
-                if (page.isNotEmpty()) {
-                    val known = videos.mapTo(HashSet()) { it.id }
-                    val merged = videos + page.filter { known.add(it.id) }
-                    videos = if (personalized) LocalRecommendationEngine.rank(merged, Graph.store.history.value, subs) else merged
-                } else if (!activeMixer.exhausted) {
-                    // Keep the continuation alive and expose a manual retry instead of ending the feed.
-                    loadMoreFailed = true
-                }
-                hasMore = !activeMixer.exhausted
-            }.onFailure {
-                if (it is kotlinx.coroutines.CancellationException) throw it
-                FeedDiagnostics.record("home", "next-page", "failure", android.os.SystemClock.elapsedRealtime() - started, error = it)
-                RuntimeDiagnostics.record("HOME_UI", "pagination-request", "failure", error = it)
-                loadMoreFailed = true
-                error = errorText(it)
-            }
+            val more = runCatching { m.more(10) }.getOrDefault(emptyList())
+            val known = videos.map { it.id }.toSet()
+            videos = videos + more.filter { it.id !in known }
             loadingMore = false
-            RuntimeDiagnostics.record("HOME_UI", "pagination-finished", if (loadMoreFailed) "failure" else "complete", "displayedVideos=${videos.size}, hasMore=$hasMore")
-        }
-    }
-
-    LaunchedEffect(listState) {
-        snapshotFlow {
-            val info = listState.layoutInfo
-            val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: -1
-            info.totalItemsCount > 0 && lastVisible >= info.totalItemsCount - 5
-        }.distinctUntilChanged().collect { nearEnd ->
-            if (nearEnd) loadNextPage()
         }
     }
 
     Column(Modifier.fillMaxSize()) {
         TopBar(onSearch, onAccount)
-        PullToRefreshBox(
-            isRefreshing = refreshing,
-            onRefresh = { if (!refreshing) { refreshing = true; reload++ } },
-            modifier = Modifier.fillMaxSize()
-        ) {
+        CategoryChips(category) { category = it; scope.launch { list.scrollToItem(0) } }
+        PullToRefreshBox(isRefreshing = refreshing, onRefresh = { refreshing = true; reload++ }, modifier = Modifier.fillMaxSize()) {
             when {
-                loading && videos.isEmpty() -> Loading()
-                error != null && videos.isEmpty() -> Message("Couldn't load videos", error, "Try again") { reload++ }
-                else -> LazyColumn(Modifier.fillMaxSize(), state = listState) {
+                loading -> Loading()
+                error != null -> Message("Couldn't load videos", error, "Try again") { reload++ }
+                else -> LazyColumn(Modifier.fillMaxSize(), state = list) {
                     items(videos, key = { it.id }) { v -> VideoCard(v, { onVideo(v) }, onChannel) }
-                    if (loadingMore) item(key = "home-loading") { Loading(Modifier.fillMaxWidth().height(72.dp)) }
-                    if (loadMoreFailed && hasMore) item(key = "home-retry") {
-                        Message("More videos couldn't load", "Your feed position is saved. Try loading the next page again.", "Retry") {
-                            loadNextPage()
-                        }
-                    }
-                    if (!hasMore && videos.isNotEmpty()) item(key = "home-end") {
-                        Text("You're up to date. Pull down to refresh.", modifier = Modifier.fillMaxWidth().padding(20.dp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                    if (loadingMore) item { Loading(Modifier.fillMaxWidth().height(72.dp)) }
                 }
             }
         }
