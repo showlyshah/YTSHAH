@@ -120,95 +120,82 @@ fun HomeScreen(
             accept = { !it.isShort },
         )
         mixer = nextMixer
-        // Load sources concurrently, but publish the first usable results immediately.
-        // The old implementation awaited trending + subscriptions + seven topic searches
-        // before rendering anything, so a slow topic source could leave Home looking blank.
-        coroutineScope {
-            val trendingTask = async {
-                val started = android.os.SystemClock.elapsedRealtime()
-                val result = runCatching { withTimeout(15_000) { Graph.repo.trending() } }
-                result.onSuccess { FeedDiagnostics.record("home", "trending-search", if (it.isEmpty()) "empty" else "success",
-                    android.os.SystemClock.elapsedRealtime() - started, it.size) }
-                    .onFailure {
-                        if (it is kotlinx.coroutines.CancellationException) throw it
-                        FeedDiagnostics.record("home", "trending-search", "failure",
-                            android.os.SystemClock.elapsedRealtime() - started, error = it)
-                    }
-                result.getOrDefault(emptyList())
+        // Publish the fast trending result before waiting for slower discovery sources.
+        // Keep subscriptions and topic discovery independent so one stalled extractor
+        // cannot leave the entire Home screen stuck in its loading state.
+        var publishedAny = false
+        fun publish(items: List<VideoItem>, source: String) {
+            val merged = (videos + items).distinctBy { it.id }
+            videos = if (personalized) LocalRecommendationEngine.rank(merged, Graph.store.history.value, subs) else merged
+            if (videos.isNotEmpty()) {
+                publishedAny = true
+                error = null
+                loading = false
+                RuntimeDiagnostics.record("HOME_UI", "source-published", "success",
+                    "source=$source, sourceItems=${items.size}, displayedVideos=${videos.size}")
             }
-            val subscriptionsTask = async {
-                if (subIds.isEmpty()) {
-                    FeedDiagnostics.record("home", "subscriptions-rss", "skipped", detail = "No subscribed channels")
-                    emptyList()
-                } else {
-                    val started = android.os.SystemClock.elapsedRealtime()
-                    val result = runCatching { withTimeout(15_000) { Graph.repo.feed(subIds, 3).take(24) } }
-                    result.onSuccess { FeedDiagnostics.record("home", "subscriptions-rss", if (it.isEmpty()) "empty" else "success",
-                        android.os.SystemClock.elapsedRealtime() - started, it.size, detail = "${subIds.size} channels") }
-                        .onFailure {
-                            if (it is kotlinx.coroutines.CancellationException) throw it
-                            FeedDiagnostics.record("home", "subscriptions-rss", "failure",
-                                android.os.SystemClock.elapsedRealtime() - started, error = it, detail = "${subIds.size} channels")
-                        }
-                    result.getOrDefault(emptyList())
-                }
-            }
-            val discoveryTask = async {
-                val started = android.os.SystemClock.elapsedRealtime()
-                val result = runCatching { withTimeout(25_000) { nextMixer.more(18) } }
-                result.onSuccess { FeedDiagnostics.record("home", "topic-discovery", if (it.isEmpty()) "empty" else "success",
-                    android.os.SystemClock.elapsedRealtime() - started, it.size) }
-                    .onFailure {
-                        if (it is kotlinx.coroutines.CancellationException) throw it
-                        FeedDiagnostics.record("home", "topic-discovery", "failure",
-                            android.os.SystemClock.elapsedRealtime() - started, error = it)
-                    }
-                result.getOrDefault(emptyList())
-            }
-
-            var accumulated = emptyList<VideoItem>()
-            fun publish(items: List<VideoItem>) {
-                accumulated = (accumulated + items).distinctBy { it.id }
-                videos = if (personalized) LocalRecommendationEngine.rank(accumulated, Graph.store.history.value, subs) else accumulated
-                if (videos.isNotEmpty()) {
-                    error = null
-                    loading = false
-                }
-            }
-
-            // Publish each source as soon as it completes; a slow trending request
-            // must not block already-loaded subscriptions or topic results.
-            val completed = kotlinx.coroutines.channels.Channel<List<VideoItem>>(3)
-            launch { completed.send(trendingTask.await()) }
-            launch { completed.send(subscriptionsTask.await()) }
-            launch { completed.send(discoveryTask.await()) }
-            repeat(3) {
-                publish(completed.receive())
-            }
-            completed.close()
-
-            if (accumulated.isEmpty()) {
-                val started = android.os.SystemClock.elapsedRealtime()
-                val fallback = runCatching {
-                    withTimeout(18_000) { Graph.repo.search("popular", FILTER_VIDEOS).items.filterIsInstance<VideoItem>() }
-                }
-                fallback.onSuccess { FeedDiagnostics.record("home", "popular-search-fallback",
-                    if (it.isEmpty()) "empty" else "success",
-                    android.os.SystemClock.elapsedRealtime() - started, it.size) }
-                    .onFailure {
-                        if (it is kotlinx.coroutines.CancellationException) throw it
-                        FeedDiagnostics.record("home", "popular-search-fallback", "failure",
-                            android.os.SystemClock.elapsedRealtime() - started, error = it)
-                    }
-                publish(fallback.getOrDefault(emptyList()))
-            }
-            FeedDiagnostics.record("home", "initial-feed", if (accumulated.isEmpty()) "empty" else "success",
-                itemCount = accumulated.size, detail = "staged=true, trending=${trendingTask.isCompleted}, subscriptions=${subscriptionsTask.isCompleted}, discovery=${discoveryTask.isCompleted}")
-            RuntimeDiagnostics.record("HOME_UI", "initial-load-results", if (accumulated.isEmpty()) "empty" else "success",
-                "videos=${accumulated.size}, mixerExhausted=${nextMixer.exhausted}")
-            hasMore = !nextMixer.exhausted
-            if (videos.isEmpty()) error = "The feed sources did not return videos. Check your connection and try again."
         }
+
+        val trendingResult = runCatching {
+            withTimeout(15_000) { Graph.repo.trending() }
+        }
+        trendingResult.onSuccess {
+            FeedDiagnostics.record("home", "trending-search", if (it.isEmpty()) "empty" else "success",
+                itemCount = it.size)
+            publish(it, "trending")
+        }.onFailure {
+            if (it is kotlinx.coroutines.CancellationException) throw it
+            FeedDiagnostics.record("home", "trending-search", "failure", error = it)
+            RuntimeDiagnostics.record("HOME_UI", "trending-source", "failure", error = it)
+        }
+
+        // Subscriptions are a secondary source; do not block the initial trending batch.
+        val subscriptionsJob = scope.launch {
+            val result = runCatching {
+                if (subIds.isEmpty()) emptyList()
+                else withTimeout(15_000) { Graph.repo.feed(subIds, 3).take(24) }
+            }
+            result.onSuccess {
+                FeedDiagnostics.record("home", "subscriptions-rss", if (it.isEmpty()) "empty" else "success",
+                    itemCount = it.size, detail = "channels=${subIds.size}")
+                publish(it, "subscriptions")
+            }.onFailure {
+                if (it is kotlinx.coroutines.CancellationException) throw it
+                FeedDiagnostics.record("home", "subscriptions-rss", "failure", error = it)
+                RuntimeDiagnostics.record("HOME_UI", "subscriptions-source", "failure", error = it)
+            }
+        }
+
+        // Topic discovery runs separately and can enrich the feed after the first paint.
+        val discoveryJob = scope.launch {
+            val result = runCatching { withTimeout(25_000) { nextMixer.more(18) } }
+            result.onSuccess {
+                FeedDiagnostics.record("home", "topic-discovery", if (it.isEmpty()) "empty" else "success",
+                    itemCount = it.size)
+                publish(it, "topic-discovery")
+            }.onFailure {
+                if (it is kotlinx.coroutines.CancellationException) throw it
+                FeedDiagnostics.record("home", "topic-discovery", "failure", error = it)
+                RuntimeDiagnostics.record("HOME_UI", "topic-discovery", "failure", error = it)
+            }
+        }
+
+        // If trending is unavailable, show the screen's retry/empty state immediately;
+        // the secondary sources can still populate it when they finish.
+        if (videos.isEmpty()) {
+            loading = false
+            error = "The feed is taking longer than expected. You can retry while other sources continue loading."
+        }
+        kotlinx.coroutines.coroutineScope {
+            subscriptionsJob.join()
+            discoveryJob.join()
+        }
+        FeedDiagnostics.record("home", "initial-feed", if (videos.isEmpty()) "empty" else "success",
+            itemCount = videos.size, detail = "trendingFirst=true")
+        RuntimeDiagnostics.record("HOME_UI", "initial-load-results", if (videos.isEmpty()) "empty" else "success",
+            "videos=${videos.size}, mixerExhausted=${nextMixer.exhausted}, publishedAny=$publishedAny")
+        hasMore = !nextMixer.exhausted
+        if (videos.isNotEmpty()) error = null
         loading = false
         refreshing = false
         RuntimeDiagnostics.record("HOME_UI", "initial-load-finished", if (videos.isEmpty()) "empty" else "success", "displayedVideos=${videos.size}, hasMore=$hasMore, errorPresent=${error != null}")
