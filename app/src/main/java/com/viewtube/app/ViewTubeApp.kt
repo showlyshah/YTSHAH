@@ -10,7 +10,12 @@ class ViewTubeApp : Application() {
         RuntimeDiagnostics.init(this)
         RuntimeDiagnostics.record("APP", "application-onCreate", "started")
         CrashReportRecorder.install(this)
-        Graph.init(this)
-        RuntimeDiagnostics.record("APP", "application-onCreate", "complete")
+        try {
+            Graph.init(this)
+            RuntimeDiagnostics.record("APP", "application-onCreate", "complete")
+        } catch (t: Throwable) {
+            RuntimeDiagnostics.record("APP", "application-init-failed", "fatal", error = t)
+            throw t
+        }
     }
 }
