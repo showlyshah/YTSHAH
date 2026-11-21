@@ -44,6 +44,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.viewtube.app.data.Graph
+import com.viewtube.app.data.FeedDiagnostics
 import com.viewtube.app.CrashReportRecorder
 import com.viewtube.app.data.SubscriptionImport
 import com.viewtube.app.player.PlayerHolder
@@ -327,6 +328,20 @@ fun AccountScreen(onBack: () -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { diagnosticExport.launch("viewtube-diagnostics.json") }) { Text("Export diagnostics") }
                 OutlinedButton(onClick = { Graph.diagnostics.clear(); status = "Diagnostic history cleared." }) { Text("Clear logs") }
+            }
+            Text(
+                "Home and Shorts have a separate local recorder. It logs source attempts, response counts, timings, pagination and errors. Nothing is uploaded automatically.",
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = {
+                    clipboard.setText(AnnotatedString(FeedDiagnostics.report()))
+                    status = "Home & Shorts feed report copied. Paste it here."
+                }) { Text("Copy feed report") }
+                OutlinedButton(onClick = {
+                    FeedDiagnostics.clear()
+                    status = "Home & Shorts feed logs cleared."
+                }) { Text("Clear feed logs") }
             }
             Text(
                 if (crashReport != null) "A saved crash report is ready to copy and paste into the bug conversation."
