@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.media.AudioManager
+import android.media.audiofx.AudioEffect
 import android.hardware.display.DisplayManager
 import android.view.Display
 import kotlin.OptIn
@@ -76,13 +77,22 @@ import com.viewtube.app.data.Comment
 import com.viewtube.app.data.Graph
 import com.viewtube.app.data.Paged
 import com.viewtube.app.data.VideoDetails
-import com.viewtube.app.data.SubtitleTrack
 import com.viewtube.app.data.errorText
 import com.viewtube.app.data.watchUrl
 import com.viewtube.app.player.PlayerHolder
-import com.viewtube.app.player.PresetEqualizer
-import com.viewtube.app.player.SubtitleSelection
 import kotlinx.coroutines.launch
+
+private fun openDeviceAudioEffects(context: Context) {
+    val sessionId = PlayerHolder.audioSessionId
+    require(sessionId > 0) { "Playback audio session is not ready." }
+    val intent = Intent(AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL).apply {
+        putExtra(AudioEffect.EXTRA_AUDIO_SESSION, sessionId)
+        putExtra(AudioEffect.EXTRA_PACKAGE_NAME, context.packageName)
+        putExtra(AudioEffect.EXTRA_CONTENT_TYPE, AudioEffect.CONTENT_TYPE_MUSIC)
+    }
+    require(intent.resolveActivity(context.packageManager) != null) { "No system audio-effects panel is installed." }
+    context.startActivity(intent)
+}
 
 private fun Context.activity(): Activity? {
     var c = this
@@ -120,7 +130,6 @@ fun WatchScreen(
     var loadingComments by remember { mutableStateOf(false) }
     var showDesc by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf(false) }
-    var subtitleSheet by remember { mutableStateOf(false) }
     var optionsSheet by remember { mutableStateOf(false) }
     var queueSheet by remember { mutableStateOf(false) }
     var aiSheet by remember { mutableStateOf(false) }
@@ -129,14 +138,6 @@ fun WatchScreen(
     var aiQuestion by remember { mutableStateOf("") }
     var useCloudForAi by remember { mutableStateOf(false) }
     var gestureFeedback by remember { mutableStateOf<String?>(null) }
-    var translationEnabled by remember { mutableStateOf(false) }
-    var captionsEnabled by remember { mutableStateOf(false) }
-    var showEqualizer by remember { mutableStateOf(false) }
-    var equalizer by remember { mutableStateOf<PresetEqualizer?>(null) }
-    var equalizerActive by remember { mutableStateOf(false) }
-    var selectedSubtitleTrack by remember { mutableStateOf<SubtitleTrack?>(null) }
-    val translationLanguages = remember { java.util.Locale.getISOLanguages().toList().sortedBy { java.util.Locale.forLanguageTag(it).getDisplayLanguage(java.util.Locale.getDefault()) } }
-    var translationTarget by remember { mutableStateOf(java.util.Locale.getDefault().language.takeIf { it in translationLanguages } ?: "en") }
     val audioSel by PlayerHolder.audioTrack.collectAsStateCompat()
     val speed by PlayerHolder.speed.collectAsStateCompat()
     val looping by PlayerHolder.looping.collectAsStateCompat()
@@ -159,26 +160,15 @@ fun WatchScreen(
         val cur = PlayerHolder.current.value
         if (cur != null && cur.video.id == videoId) {
             details = cur
-            val selection = PlayerHolder.currentSubtitleSelection
-            selectedSubtitleTrack = cur.subtitles.firstOrNull { it.url == selection.sourceUrl } ?: cur.subtitles.firstOrNull()
-            translationEnabled = selection.targetLanguage != null
-            translationTarget = selection.targetLanguage ?: translationTarget
-            captionsEnabled = PlayerHolder.subtitlesEnabled
             return@LaunchedEffect
         }
         details = null
         runCatching { Graph.repo.details(videoId) }
             .onSuccess { d ->
                 details = d
-                selectedSubtitleTrack = d.subtitles.firstOrNull()
                 Graph.store.addHistory(d.video)
                 runCatching {
                     PlayerHolder.play(d, startMs = Graph.store.positionOf(videoId))
-                    val selection = PlayerHolder.currentSubtitleSelection
-                    selectedSubtitleTrack = d.subtitles.firstOrNull { it.url == selection.sourceUrl } ?: d.subtitles.firstOrNull()
-                    translationEnabled = selection.targetLanguage != null
-                    translationTarget = selection.targetLanguage ?: translationTarget
-                    captionsEnabled = PlayerHolder.subtitlesEnabled
                 }.onFailure { error = errorText(it) }
             }
             .onFailure { error = errorText(it) }
@@ -187,14 +177,6 @@ fun WatchScreen(
     // Autoplay is handled by PlayerHolder; when it moves on, follow it.
     LaunchedEffect(videoId) {
         PlayerHolder.advanced.collect { id -> if (id != videoId) onVideo(id) }
-    }
-
-    LaunchedEffect(showEqualizer) {
-        if (showEqualizer) {
-            val effect = PlayerHolder.getEqualizer()
-            equalizer = effect
-            equalizerActive = runCatching { effect?.enabled == true }.getOrDefault(false)
-        }
     }
 
     LaunchedEffect(gestureFeedback) {
@@ -287,8 +269,7 @@ fun WatchScreen(
             )
             Row(Modifier.align(Alignment.TopEnd).padding(3.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { sheet = true }, modifier = Modifier.size(38.dp)) { Text("HD", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
-                IconButton(onClick = { subtitleSheet = true }, modifier = Modifier.size(38.dp)) { Text("CC", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
-                IconButton(onClick = { showEqualizer = true }, modifier = Modifier.size(38.dp)) { Text("EQ", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+                IconButton(onClick = { runCatching { openDeviceAudioEffects(ctx) }.onFailure { error = "No compatible system audio-effects panel is available on this device." } }, modifier = Modifier.size(38.dp)) { Text("EQ", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
                 IconButton(onClick = { optionsSheet = true }, modifier = Modifier.size(38.dp)) {
                     Icon(Icons.Default.MoreVert, contentDescription = "Player options", tint = Color.White, modifier = Modifier.size(19.dp))
                 }
@@ -508,157 +489,11 @@ fun WatchScreen(
         Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
             SheetTitle("Player options")
             SheetRow("Video quality and audio tracks", false) { optionsSheet = false; sheet = true }
-            SheetRow("Subtitles and translation", captionsEnabled) { optionsSheet = false; subtitleSheet = true }
-            SheetRow("Audio equalizer", equalizerActive) { optionsSheet = false; showEqualizer = true }
+            SheetRow("Device audio effects", false) { optionsSheet = false; runCatching { openDeviceAudioEffects(ctx) }.onFailure { error = "No compatible system audio-effects panel is available on this device." } }
             SheetRow("Play-next queue (${queue.size})", queue.isNotEmpty()) { optionsSheet = false; queueSheet = true }
             SheetRow("AI insights", false) { optionsSheet = false; aiSheet = true; aiText = null }
             SheetRow(if (audioOnly) "Turn video back on" else "Audio only", audioOnly) { PlayerHolder.setAudioOnly(!audioOnly); optionsSheet = false }
             SheetRow(if (looping) "Turn loop off" else "Loop video", looping) { PlayerHolder.setLooping(!looping); optionsSheet = false }
-        }
-    }
-
-    if (subtitleSheet && dd != null) ModalBottomSheet(onDismissRequest = { subtitleSheet = false }) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
-            SheetTitle("YouTube subtitles")
-            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Show captions", fontWeight = FontWeight.Medium)
-                    Text("Use the player's native subtitle renderer", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Switch(
-                    checked = captionsEnabled,
-                    onCheckedChange = { enabled ->
-                        captionsEnabled = enabled
-                        PlayerHolder.setSubtitlesEnabled(enabled)
-                        if (enabled) {
-                            PlayerHolder.setSubtitleSelection(
-                                SubtitleSelection(
-                                    sourceUrl = selectedSubtitleTrack?.url,
-                                    targetLanguage = translationTarget.takeIf { translationEnabled },
-                                )
-                            )
-                            val position = PlayerHolder.player.currentPosition
-                            val wasPlaying = PlayerHolder.player.playWhenReady
-                            runCatching {
-                                PlayerHolder.play(
-                                    dd,
-                                    wantedHeight = height.takeIf { it > 0 } ?: PlayerHolder.defaultHeight(dd),
-                                    startMs = position,
-                                    audioTrackId = audioSel,
-                                )
-                                if (!wasPlaying) PlayerHolder.player.pause()
-                            }.onFailure { error = errorText(it) }
-                        }
-                    }
-                )
-            }
-            if (dd.subtitles.isEmpty()) {
-                Text(
-                    "YouTube did not provide caption tracks for this video.",
-                    modifier = Modifier.padding(vertical = 8.dp),
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                SheetTitle("Original YouTube caption track")
-                dd.subtitles.forEach { track ->
-                    SheetRow(
-                        track.languageName + if (track.autoGenerated) " · auto-generated" else "",
-                        selectedSubtitleTrack?.url == track.url
-                    ) { selectedSubtitleTrack = track }
-                }
-                Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("YouTube auto-translation", fontWeight = FontWeight.Medium)
-                        Text("Request a translated caption track directly from YouTube", fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Switch(checked = translationEnabled, onCheckedChange = { translationEnabled = it })
-                }
-                if (translationEnabled) {
-                    SheetTitle("Translate into")
-                    LazyColumn(Modifier.height(240.dp)) {
-                        items(translationLanguages) { code ->
-                            val label = java.util.Locale.forLanguageTag(code)
-                                .getDisplayName(java.util.Locale.getDefault())
-                            SheetRow(label.replaceFirstChar { it.uppercase() }, translationTarget == code) {
-                                translationTarget = code
-                            }
-                        }
-                    }
-                }
-                Text(
-                    "Translation is served by YouTube's caption service. It depends on the selected source track and whether YouTube supports that language for this video.",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-                OutlinedButton(
-                    onClick = {
-                        val position = PlayerHolder.player.currentPosition
-                        val wasPlaying = PlayerHolder.player.playWhenReady
-                        runCatching {
-                            PlayerHolder.setSubtitleSelection(
-                                SubtitleSelection(
-                                    sourceUrl = selectedSubtitleTrack?.url,
-                                    targetLanguage = translationTarget.takeIf { translationEnabled },
-                                )
-                            )
-                            PlayerHolder.setSubtitlesEnabled(true)
-                            PlayerHolder.play(
-                                dd,
-                                wantedHeight = height.takeIf { it > 0 } ?: PlayerHolder.defaultHeight(dd),
-                                startMs = position,
-                                audioTrackId = audioSel,
-                            )
-                            captionsEnabled = true
-                            if (!wasPlaying) PlayerHolder.player.pause()
-                        }.onFailure { error = errorText(it) }
-                        subtitleSheet = false
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (translationEnabled) "Apply YouTube auto-translation" else "Apply original captions")
-                }
-            }
-        }
-    }
-
-    if (showEqualizer) ModalBottomSheet(onDismissRequest = { showEqualizer = false }) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
-            Text("Audio equalizer", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-            Text(
-                "Choose from 15 prebuilt sound profiles. No manual frequency bands.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
-            )
-            val eq = equalizer
-            if (eq == null) {
-                Text("This device has no available equalizer for the current playback session.",
-                    color = MaterialTheme.colorScheme.error)
-            } else {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Text("Equalizer enabled", modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium)
-                    Switch(checked = equalizerActive, onCheckedChange = { enabled ->
-                        equalizerActive = PlayerHolder.setEqualizerEnabled(enabled)
-                    })
-                }
-                SheetTitle("Sound profiles")
-                LazyColumn(Modifier.height(360.dp)) {
-                    items((0 until eq.numberOfPresets.toInt()).toList()) { index ->
-                        SheetRow(eq.getPresetName(index.toShort()), eq.activePreset == index) {
-                            if (PlayerHolder.applyEqualizerPreset(index)) {
-                                equalizerActive = PlayerHolder.setEqualizerEnabled(true)
-                            }
-                        }
-                    }
-                }
-                OutlinedButton(
-                    onClick = { equalizerActive = PlayerHolder.setEqualizerEnabled(false) },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Turn off equalizer") }
-            }
         }
     }
 
