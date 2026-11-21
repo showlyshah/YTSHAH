@@ -9,6 +9,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DataSource
@@ -23,6 +24,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.MergingMediaSource
 import com.viewtube.app.data.Graph
+import com.viewtube.app.data.RuntimeDiagnostics
 import com.viewtube.app.data.SponsorBlock
 import com.viewtube.app.data.VideoDetails
 import kotlinx.coroutines.CoroutineScope
@@ -103,9 +105,11 @@ object PlayerHolder {
 
     fun init(context: Context) {
         appContext = context.applicationContext
+        RuntimeDiagnostics.record("PLAYER", "holder-init", "ok")
     }
 
     private fun buildPlayer(): ExoPlayer {
+        RuntimeDiagnostics.record("PLAYER", "engine-build", "started", "engine=Media3 ExoPlayer")
         val p = ExoPlayer.Builder(appContext)
             .setMediaSourceFactory(DefaultMediaSourceFactory(sourceFactory()))
             .setAudioAttributes(
@@ -123,9 +127,23 @@ object PlayerHolder {
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) { _playing.value = playWhenReady && p.playbackState != Player.STATE_ENDED }
             override fun onPlaybackStateChanged(state: Int) {
                 _playing.value = p.playWhenReady && state != Player.STATE_ENDED
+                val label = when (state) {
+                    Player.STATE_IDLE -> "idle"
+                    Player.STATE_BUFFERING -> "buffering"
+                    Player.STATE_READY -> "ready"
+                    Player.STATE_ENDED -> "ended"
+                    else -> "unknown:$state"
+                }
+                RuntimeDiagnostics.record("PLAYER", "playback-state", label,
+                    "playWhenReady=${p.playWhenReady}, isPlaying=${p.isPlaying}, mediaId=${p.currentMediaItem?.mediaId ?: "none"}")
                 if (state == Player.STATE_ENDED) onEnded()
             }
+            override fun onPlayerError(error: PlaybackException) {
+                RuntimeDiagnostics.record("PLAYER", "player-error", "failure",
+                    "errorCode=${error.errorCode}, errorCodeName=${error.errorCodeName}, mediaId=${p.currentMediaItem?.mediaId ?: "none"}", error)
+            }
         })
+        RuntimeDiagnostics.record("PLAYER", "engine-build", "ready", "audioSessionId=${p.audioSessionId}")
         return p
     }
 
@@ -246,6 +264,8 @@ object PlayerHolder {
         audioTrackId: String? = _audioTrack.value,
         loop: Boolean = false,
     ) {
+        RuntimeDiagnostics.record("PLAYER", "play-request", "started",
+            "videoId=${d.video.id}, live=${d.isLive}, wantedHeight=$wantedHeight, startMs=$startMs, audioStreams=${d.audio.size}, muxedStreams=${d.muxed.size}, videoOnlyStreams=${d.videoOnly.size}")
         if (loop) _repeatMode.value = "one"
         loopRepeatEnabled = _repeatMode.value == "one"
         _looping.value = loopRepeatEnabled
@@ -293,10 +313,12 @@ object PlayerHolder {
 
         if (!same) loadSegments(d.video.id)
         startWatching(d)
+        RuntimeDiagnostics.record("PLAYER", "media-prepared", "ok", "videoId=${d.video.id}, selectedHeight=${_height.value}, resumeAt=$resumeAt")
         ContextCompat.startForegroundService(appContext, Intent(appContext, PlaybackService::class.java))
     }
 
     fun stop() {
+        RuntimeDiagnostics.record("PLAYER", "stop-request", "started", "mediaId=${player.currentMediaItem?.mediaId ?: "none"}")
         saveProgress()
         watcher?.cancel(); saver?.cancel(); sleepJob?.cancel(); sleepJob = null; _sleepRemainingMs.value = null
         // Explicitly clear playWhenReady before clearing the playlist. MediaSessionService
@@ -309,6 +331,7 @@ object PlayerHolder {
         _playing.value = false
         segments = emptyList()
         runCatching { appContext.stopService(Intent(appContext, PlaybackService::class.java)) }
+        RuntimeDiagnostics.record("PLAYER", "stopped", "ok")
     }
 
     fun toggle() { if (player.playWhenReady) player.pause() else player.play() }
