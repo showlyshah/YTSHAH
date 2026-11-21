@@ -81,6 +81,7 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
+    val pagerState = androidx.compose.foundation.pager.rememberPagerState(pageCount = { videos.size })
 
     LaunchedEffect(reload) {
         RuntimeDiagnostics.record("SHORTS_UI", "initial-load", "started", "reload=$reload subscriptions=${Graph.store.subs.value.size}")
@@ -99,7 +100,7 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
             RuntimeDiagnostics.record("SHORTS_UI", "initial-load-results", if (videos.isEmpty()) "empty" else "success", "videos=${videos.size}, hasContinuation=${page.next != null}")
             FeedDiagnostics.record("shorts", "initial-feed", if (videos.isEmpty()) "empty" else "success",
                 android.os.SystemClock.elapsedRealtime() - started, videos.size,
-                detail = "hasContinuation=${page.next != null}")
+                detail = "verticalPager=true, hasContinuation=${page.next != null}")
         }.onFailure {
             if (it is CancellationException) throw it
             FeedDiagnostics.record("shorts", "initial-feed", "failure",
@@ -120,9 +121,10 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
             val started = android.os.SystemClock.elapsedRealtime()
             runCatching { fetch() }
                 .onSuccess { page ->
+                    val before = videos.size
                     videos = (videos + page.items).distinctBy { it.id }
                     nextPage = page.next
-                    RuntimeDiagnostics.record("SHORTS_UI", "pagination-results", if (page.items.isEmpty()) "empty" else "success", "newItems=${page.items.size}, total=${videos.size}, hasContinuation=${page.next != null}")
+                    RuntimeDiagnostics.record("SHORTS_UI", "pagination-results", if (page.items.isEmpty()) "empty" else "success", "newItems=${videos.size - before}, total=${videos.size}, hasContinuation=${page.next != null}")
                     FeedDiagnostics.record("shorts", "next-page", if (page.items.isEmpty()) "empty" else "success",
                         android.os.SystemClock.elapsedRealtime() - started, page.items.size,
                         detail = "total=${videos.size}, hasContinuation=${page.next != null}")
@@ -139,37 +141,61 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
         }
     }
 
+    // Fetch the next page before the viewer reaches the end of the current batch.
+    LaunchedEffect(pagerState.currentPage, videos.size) {
+        if (videos.isNotEmpty() && pagerState.currentPage >= videos.size - 3) loadMore()
+    }
+
     Column(Modifier.fillMaxSize()) {
         TopBar(onSearch = {}, onAccount = {})
         when {
             loading -> Loading()
-            videos.isEmpty() && nextPage == null ->
+            videos.isEmpty() ->
                 Message(
                     if (error != null) "Couldn't load Shorts" else "No Shorts found",
                     error ?: "The source did not return any videos identified as Shorts.",
                     "Try again"
                 ) { reload++ }
-            else -> LazyColumn(Modifier.fillMaxSize()) {
-                items(videos, key = { it.id }) { video ->
-                    VideoCard(video, { onVideo(video) }, onChannel)
-                }
-                item {
-                    if (nextPage != null) {
-                        Button(
-                            onClick = { loadMore() },
-                            enabled = !loadingMore,
-                            modifier = Modifier.fillMaxWidth().padding(16.dp)
-                        ) {
-                            Text(if (loadingMore) "Loading…" else "Load more Shorts")
-                        }
-                    } else if (videos.isNotEmpty()) {
-                        Text(
-                            "You're all caught up",
-                            modifier = Modifier.fillMaxWidth().padding(16.dp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+            else -> androidx.compose.foundation.layout.Box(
+                Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black)
+            ) {
+                androidx.compose.foundation.pager.VerticalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize(),
+                    key = { page -> videos[page].id }
+                ) { page ->
+                    val video = videos[page]
+                    androidx.compose.foundation.layout.Box(
+                        Modifier.fillMaxSize().clickable { onVideo(video) }
+                    ) {
+                        coil.compose.AsyncImage(
+                            model = video.thumbnail,
+                            contentDescription = video.title,
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
                         )
+                        Column(
+                            Modifier.align(Alignment.BottomStart).fillMaxWidth()
+                                .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.62f))
+                                .padding(horizontal = 18.dp, vertical = 20.dp)
+                        ) {
+                            Text(video.channelName.ifBlank { "Shorts" }, color = androidx.compose.ui.graphics.Color.White,
+                                fontWeight = FontWeight.SemiBold, maxLines = 1)
+                            Text(video.title, color = androidx.compose.ui.graphics.Color.White,
+                                fontSize = 16.sp, fontWeight = FontWeight.Medium,
+                                modifier = Modifier.padding(top = 6.dp), maxLines = 3)
+                            Text("Tap to play  •  Swipe up for next", color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.82f),
+                                fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
+                        }
                     }
-                    error?.let { Text(it, modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error) }
+                }
+                if (loadingMore) {
+                    Text("Loading more Shorts…", color = androidx.compose.ui.graphics.Color.White,
+                        modifier = Modifier.align(Alignment.TopCenter).padding(12.dp))
+                }
+                error?.let {
+                    Text(it, color = androidx.compose.ui.graphics.Color.White,
+                        modifier = Modifier.align(Alignment.TopCenter).padding(12.dp))
                 }
             }
         }
