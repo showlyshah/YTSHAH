@@ -131,13 +131,14 @@ fun WatchScreen(
     var useCloudForAi by remember { mutableStateOf(false) }
     var gestureFeedback by remember { mutableStateOf<String?>(null) }
     var translationEnabled by remember { mutableStateOf(false) }
+    var cloudTranslationEnabled by remember { mutableStateOf(false) }
     var captionsEnabled by remember { mutableStateOf(true) }
     var showEqualizer by remember { mutableStateOf(false) }
     var equalizer by remember { mutableStateOf<PegelEqualizer?>(null) }
     var eqLevels by remember { mutableStateOf<List<Int>>(emptyList()) }
     var equalizerActive by remember { mutableStateOf(false) }
     var selectedSubtitleTrack by remember { mutableStateOf<SubtitleTrack?>(null) }
-    val translationLanguages = remember { com.google.mlkit.nl.translate.TranslateLanguage.getAllLanguages().sortedBy { java.util.Locale.forLanguageTag(it).getDisplayLanguage(java.util.Locale.getDefault()) } }
+    val translationLanguages = remember { java.util.Locale.getISOLanguages().toList().sortedBy { java.util.Locale.forLanguageTag(it).getDisplayLanguage(java.util.Locale.getDefault()) } }
     var translationTarget by remember { mutableStateOf(java.util.Locale.getDefault().language.takeIf { it in translationLanguages } ?: "en") }
     var translatedCaption by remember { mutableStateOf<String?>(null) }
     var translationError by remember { mutableStateOf<String?>(null) }
@@ -178,7 +179,7 @@ fun WatchScreen(
         PlayerHolder.advanced.collect { id -> if (id != videoId) onVideo(id) }
     }
 
-    LaunchedEffect(videoId, captionsEnabled, translationEnabled, selectedSubtitleTrack, translationTarget) {
+    LaunchedEffect(videoId, captionsEnabled, translationEnabled, cloudTranslationEnabled, selectedSubtitleTrack, translationTarget) {
         translatedCaption = null
         translationError = null
         val track = selectedSubtitleTrack
@@ -186,21 +187,50 @@ fun WatchScreen(
         var translator: OnDeviceSubtitleTranslator? = null
         try {
             val cues = Graph.repo.subtitleCues(track)
+            val sourceLanguage = java.util.Locale.forLanguageTag(track.languageTag).language
+            val targetLanguage = java.util.Locale.forLanguageTag(translationTarget).language
+            val needsTranslation = translationEnabled && sourceLanguage != targetLanguage
             val sourceCode = com.google.mlkit.nl.translate.TranslateLanguage.fromLanguageTag(track.languageTag)
             val targetCode = com.google.mlkit.nl.translate.TranslateLanguage.fromLanguageTag(translationTarget)
-            val shouldTranslate = translationEnabled && sourceCode != null && targetCode != null && sourceCode != targetCode
-            val activeTranslator = if (shouldTranslate) OnDeviceSubtitleTranslator.create(track.languageTag, translationTarget) else null
-            translator = activeTranslator
+            val localSupported = sourceCode != null && targetCode != null
+            if (needsTranslation && localSupported) {
+                translator = runCatching {
+                    OnDeviceSubtitleTranslator.create(track.languageTag, translationTarget)
+                }.getOrNull()
+            }
+            val allowCloudFallback = cloudTranslationEnabled && Graph.store.cloudAiEnabled.value
+            if (needsTranslation && translator == null && !allowCloudFallback) {
+                translationError = "On-device translation is unavailable for this language. Enable cloud AI in Account & settings and opt in to online fallback here."
+            }
+            val cloudCache = HashMap<String, String>()
             var previousText: String? = null
             while (true) {
                 val position = PlayerHolder.player.currentPosition
                 val sourceText = cues.firstOrNull { position >= it.startMs && position < it.endMs }?.text
                 if (sourceText != previousText) {
                     previousText = sourceText
-                    translatedCaption = when {
-                        sourceText.isNullOrBlank() -> null
-                        activeTranslator != null -> activeTranslator.translate(sourceText)
-                        else -> sourceText
+                    translatedCaption = if (sourceText.isNullOrBlank()) null else if (!needsTranslation) {
+                        sourceText
+                    } else {
+                        val localText = translator?.let { local ->
+                            runCatching { local.translate(sourceText) }.getOrNull()
+                        }
+                        if (localText != null) {
+                            localText
+                        } else if (allowCloudFallback) {
+                            cloudCache[sourceText] ?: run {
+                                val response = Graph.ai.executeCloud(com.viewtube.app.data.AiRequest(
+                                    task = com.viewtube.app.data.AiTask.SUBTITLE_TRANSLATION,
+                                    prompt = "Translate this subtitle from ${java.util.Locale.forLanguageTag(track.languageTag).getDisplayName()} to ${java.util.Locale.forLanguageTag(translationTarget).getDisplayName()}. Return only the translated line.",
+                                    videoTitle = dd?.video?.title,
+                                    sourceText = sourceText,
+                                    allowCloud = true
+                                ))
+                                response.text.trim().also { cloudCache[sourceText] = it }
+                            }
+                        } else {
+                            sourceText
+                        }
                     }
                 }
                 kotlinx.coroutines.delay(180)
@@ -208,7 +238,7 @@ fun WatchScreen(
         } catch (error: Throwable) {
             if (error is kotlinx.coroutines.CancellationException) throw error
             translationError = error.message ?: "Subtitle loading or translation failed."
-            translatedCaption = null
+            if (translatedCaption == null) translatedCaption = ""
         } finally {
             translator?.close()
         }
@@ -574,9 +604,26 @@ fun WatchScreen(
                 Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Translate subtitles", fontWeight = FontWeight.Medium)
-                        Text("On-device AI · supported languages", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("On-device first, online AI if needed", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Switch(checked = translationEnabled, onCheckedChange = { translationEnabled = it })
+                }
+                if (translationEnabled) {
+                    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Allow online AI fallback", fontWeight = FontWeight.Medium)
+                            Text(
+                                if (Graph.store.cloudAiEnabled.value) "Only used when on-device translation is unavailable"
+                                else "First enable optional cloud AI in Account & settings",
+                                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = cloudTranslationEnabled,
+                            onCheckedChange = { cloudTranslationEnabled = it },
+                            enabled = Graph.store.cloudAiEnabled.value
+                        )
+                    }
                 }
                 SheetTitle("Show subtitles in")
                 LazyColumn(Modifier.height(260.dp)) {
