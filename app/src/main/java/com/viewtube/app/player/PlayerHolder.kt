@@ -2,11 +2,13 @@ package com.viewtube.app.player
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import androidx.core.content.ContextCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
@@ -17,12 +19,9 @@ import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.dash.DashMediaSource
-import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.MergingMediaSource
-import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import com.viewtube.app.data.Graph
 import com.viewtube.app.data.SponsorBlock
 import com.viewtube.app.data.VideoDetails
@@ -62,26 +61,24 @@ object PlayerHolder {
         )
     }
 
-    private val generatedAudioSessionId: Int by lazy {
-        runCatching {
-            (appContext.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager).generateAudioSessionId()
-        }.getOrDefault(C.AUDIO_SESSION_ID_UNSET)
-    }
-    val audioSessionId: Int get() = generatedAudioSessionId
-    private var equalizerEffect: PegelEqualizer? = null
+    private var equalizerEffect: PresetEqualizer? = null
+    private var equalizerSessionId: Int = C.AUDIO_SESSION_ID_UNSET
+    val audioSessionId: Int get() = runCatching { player.audioSessionId }.getOrDefault(C.AUDIO_SESSION_ID_UNSET)
     val player: ExoPlayer by lazy { buildPlayer() }
 
-    /** One persistent effect per ExoPlayer audio session; opening the EQ UI never recreates it. */
+    /** Attach the Android equalizer to the actual ExoPlayer audio session, never a generated surrogate. */
     private fun ensureEqualizer() {
-        if (equalizerEffect != null) return
         val session = audioSessionId
         if (session <= 0) return
-        equalizerEffect = runCatching {
-            PegelEqualizer.create(session)
-        }.onFailure { Graph.diagnostics.record("equalizer_init", it) }.getOrNull()
+        if (equalizerSessionId == session && equalizerEffect != null) return
+        equalizerEffect?.release()
+        equalizerEffect = null
+        equalizerSessionId = session
+        equalizerEffect = runCatching { PresetEqualizer.create(session) }
+            .onFailure { Graph.diagnostics.record("equalizer_init", it) }.getOrNull()
     }
 
-    fun getEqualizer(): PegelEqualizer? {
+    fun getEqualizer(): PresetEqualizer? {
         ensureEqualizer()
         return equalizerEffect
     }
@@ -90,14 +87,6 @@ object PlayerHolder {
         val effect = getEqualizer() ?: return false
         return runCatching { effect.enabled = enabled; effect.enabled }
             .onFailure { Graph.diagnostics.record("equalizer_toggle", it) }.getOrDefault(false)
-    }
-
-    fun setEqualizerBand(band: Int, levelMillibels: Int): Boolean {
-        val effect = getEqualizer() ?: return false
-        return runCatching {
-            effect.setBandLevel(band.toShort(), levelMillibels.coerceIn(effect.bandLevelRange[0].toInt(), effect.bandLevelRange[1].toInt()).toShort())
-            true
-        }.onFailure { Graph.diagnostics.record("equalizer_band", it) }.getOrDefault(false)
     }
 
     fun applyEqualizerPreset(preset: Int): Boolean {
@@ -159,10 +148,7 @@ object PlayerHolder {
             )
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)
-            .build().also { player ->
-                val sessionId = generatedAudioSessionId
-                if (sessionId != C.AUDIO_SESSION_ID_UNSET && sessionId > 0) player.setAudioSessionId(sessionId)
-            }
+            .build()
         p.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) { _playing.value = p.playWhenReady && p.playbackState != Player.STATE_ENDED }
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) { _playing.value = playWhenReady && p.playbackState != Player.STATE_ENDED }
@@ -270,15 +256,17 @@ object PlayerHolder {
         return at.firstOrNull { it.format == MediaFormat.MPEG_4 } ?: at.firstOrNull()
     }
 
-    private fun mediaSource(stream: Stream, item: MediaItem): MediaSource {
-        val factory = sourceFactory()
-        val url = stream.content
-        val mi = item.buildUpon().setUri(url).build()
-        return when (stream.deliveryMethod) {
-            DeliveryMethod.HLS -> HlsMediaSource.Factory(factory).createMediaSource(mi)
-            DeliveryMethod.DASH -> DashMediaSource.Factory(factory).createMediaSource(mi)
-            else -> ProgressiveMediaSource.Factory(factory).createMediaSource(mi)
+    private fun mediaSource(stream: Stream, item: MediaItem, includeSubtitles: Boolean = true): MediaSource {
+        val builder = item.buildUpon().setUri(stream.content)
+        if (!includeSubtitles) builder.setSubtitleConfigurations(emptyList())
+        when (stream.deliveryMethod) {
+            DeliveryMethod.HLS -> builder.setMimeType(MimeTypes.APPLICATION_M3U8)
+            DeliveryMethod.DASH -> builder.setMimeType(MimeTypes.APPLICATION_MPD)
+            else -> Unit
         }
+        // DefaultMediaSourceFactory merges side-loaded YouTube caption tracks into the video
+        // source and selects the correct parser from each track's native MIME type.
+        return DefaultMediaSourceFactory(sourceFactory()).createMediaSource(builder.build())
     }
 
     // -------------------------------------------------------------------- play
@@ -291,6 +279,8 @@ object PlayerHolder {
         startMs: Long = 0,
         audioTrackId: String? = _audioTrack.value,
         loop: Boolean = false,
+        subtitleSourceUrl: String? = null,
+        subtitleTargetLanguage: String? = null,
     ) {
         if (loop) _repeatMode.value = "one"
         loopRepeatEnabled = _repeatMode.value == "one"
@@ -305,7 +295,38 @@ object PlayerHolder {
             .setArtist(d.channel.name)
             .setArtworkUri(d.video.thumbnail?.let { android.net.Uri.parse(it) })
             .build()
-        val item = MediaItem.Builder().setMediaId(d.video.id).setMediaMetadata(meta).build()
+        val subtitleConfigurations = if (d.isLive) emptyList() else buildList {
+            d.subtitles.forEach { track ->
+                add(
+                    MediaItem.SubtitleConfiguration.Builder(Uri.parse(track.url))
+                        .setMimeType(track.mimeType)
+                        .setLanguage(track.languageTag)
+                        .setLabel("${track.languageName} · Original")
+                        .build()
+                )
+                val target = subtitleTargetLanguage?.takeIf {
+                    subtitleSourceUrl == track.url && it.isNotBlank() &&
+                        !it.equals(track.languageTag.substringBefore('-'), ignoreCase = true)
+                }
+                if (target != null) {
+                    val translatedUri = Uri.parse(track.url).buildUpon()
+                        .appendQueryParameter("tlang", target)
+                        .build()
+                    add(
+                        MediaItem.SubtitleConfiguration.Builder(translatedUri)
+                            .setMimeType(track.mimeType)
+                            .setLanguage(target)
+                            .setLabel("${track.languageName} · YouTube auto-translate")
+                            .build()
+                    )
+                }
+            }
+        }
+        val item = MediaItem.Builder()
+            .setMediaId(d.video.id)
+            .setMediaMetadata(meta)
+            .setSubtitleConfigurations(subtitleConfigurations)
+            .build()
 
         val source: MediaSource
         if (d.isLive && d.hlsUrl != null) {
@@ -318,11 +339,11 @@ object PlayerHolder {
             val muxed = bestVideo(d.muxed, wantedHeight)
             val chosen: MediaSource? = when {
                 videoOnly != null && audio != null ->
-                    MergingMediaSource(mediaSource(videoOnly, item), mediaSource(audio, item))
-                muxed != null -> mediaSource(muxed, item)
+                    MergingMediaSource(mediaSource(videoOnly, item), mediaSource(audio, item, includeSubtitles = false))
+                muxed != null -> mediaSource(muxed, item, includeSubtitles = true)
                 // Nothing at that exact height: use the best muxed stream, or audio only.
-                d.muxed.isNotEmpty() -> mediaSource(d.muxed.maxBy { it.height }, item)
-                audio != null -> mediaSource(audio, item)
+                d.muxed.isNotEmpty() -> mediaSource(d.muxed.maxBy { it.height }, item, includeSubtitles = true)
+                audio != null -> mediaSource(audio, item, includeSubtitles = false)
                 else -> null
             }
             requireNotNull(chosen) { "This video has no playable streams (it may be restricted)." }
@@ -333,8 +354,6 @@ object PlayerHolder {
 
         _current.value = d
         player.setMediaSource(source)
-        // Initialise the Android audio effect before the new track starts, not when the EQ sheet opens.
-        ensureEqualizer()
         player.prepare()
         if (resumeAt > 0) player.seekTo(resumeAt)
         player.setPlaybackSpeed(_speed.value)
@@ -354,6 +373,9 @@ object PlayerHolder {
         player.pause()
         player.stop()
         player.clearMediaItems()
+        equalizerEffect?.release()
+        equalizerEffect = null
+        equalizerSessionId = C.AUDIO_SESSION_ID_UNSET
         _current.value = null
         _playing.value = false
         segments = emptyList()
@@ -408,6 +430,13 @@ object PlayerHolder {
         sleepJob?.cancel()
         sleepJob = null
         _sleepRemainingMs.value = null
+    }
+
+    /** Enables or disables the native text renderer used by YouTube's original subtitle tracks. */
+    fun setSubtitlesEnabled(enabled: Boolean) {
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !enabled)
+            .build()
     }
 
     /** Disables only the video renderer; audio continues through the same media session. */
