@@ -29,7 +29,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Slider
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -82,7 +81,7 @@ import com.viewtube.app.data.OnDeviceSubtitleTranslator
 import com.viewtube.app.data.errorText
 import com.viewtube.app.data.watchUrl
 import com.viewtube.app.player.PlayerHolder
-import com.viewtube.app.player.PegelEqualizer
+import com.viewtube.app.player.PresetEqualizer
 import kotlinx.coroutines.launch
 
 private fun Context.activity(): Activity? {
@@ -131,17 +130,13 @@ fun WatchScreen(
     var useCloudForAi by remember { mutableStateOf(false) }
     var gestureFeedback by remember { mutableStateOf<String?>(null) }
     var translationEnabled by remember { mutableStateOf(false) }
-    var cloudTranslationEnabled by remember { mutableStateOf(false) }
     var captionsEnabled by remember { mutableStateOf(true) }
     var showEqualizer by remember { mutableStateOf(false) }
-    var equalizer by remember { mutableStateOf<PegelEqualizer?>(null) }
-    var eqLevels by remember { mutableStateOf<List<Int>>(emptyList()) }
+    var equalizer by remember { mutableStateOf<PresetEqualizer?>(null) }
     var equalizerActive by remember { mutableStateOf(false) }
     var selectedSubtitleTrack by remember { mutableStateOf<SubtitleTrack?>(null) }
     val translationLanguages = remember { java.util.Locale.getISOLanguages().toList().sortedBy { java.util.Locale.forLanguageTag(it).getDisplayLanguage(java.util.Locale.getDefault()) } }
     var translationTarget by remember { mutableStateOf(java.util.Locale.getDefault().language.takeIf { it in translationLanguages } ?: "en") }
-    var translatedCaption by remember { mutableStateOf<String?>(null) }
-    var translationError by remember { mutableStateOf<String?>(null) }
     val audioSel by PlayerHolder.audioTrack.collectAsStateCompat()
     val speed by PlayerHolder.speed.collectAsStateCompat()
     val looping by PlayerHolder.looping.collectAsStateCompat()
@@ -180,90 +175,11 @@ fun WatchScreen(
         PlayerHolder.advanced.collect { id -> if (id != videoId) onVideo(id) }
     }
 
-    LaunchedEffect(videoId, captionsEnabled, translationEnabled, cloudTranslationEnabled, selectedSubtitleTrack, translationTarget) {
-        translatedCaption = null
-        translationError = null
-        val track = selectedSubtitleTrack
-        if (!captionsEnabled || track == null) return@LaunchedEffect
-        var translator: OnDeviceSubtitleTranslator? = null
-        try {
-            val cues = Graph.repo.subtitleCues(track)
-            require(cues.isNotEmpty()) { "The selected subtitle track contains no readable caption cues." }
-            val sourceLanguage = java.util.Locale.forLanguageTag(track.languageTag).language
-            val targetLanguage = java.util.Locale.forLanguageTag(translationTarget).language
-            val needsTranslation = translationEnabled && sourceLanguage != targetLanguage
-            val sourceCode = com.google.mlkit.nl.translate.TranslateLanguage.fromLanguageTag(sourceLanguage)
-            val targetCode = com.google.mlkit.nl.translate.TranslateLanguage.fromLanguageTag(targetLanguage)
-            val localSupported = sourceCode != null && targetCode != null
-            if (needsTranslation && localSupported) {
-                translator = runCatching {
-                    OnDeviceSubtitleTranslator.create(track.languageTag, translationTarget)
-                }.getOrNull()
-            }
-            val allowCloudFallback = cloudTranslationEnabled && cloudAiEnabled
-            if (needsTranslation && translator == null && !allowCloudFallback) {
-                translationError = "On-device translation is unavailable for this language. Enable cloud AI in Account & settings and opt in to online fallback here."
-            }
-            val cloudCache = HashMap<String, String>()
-            var previousText: String? = null
-            while (true) {
-                val position = PlayerHolder.player.currentPosition
-                val sourceText = cues.firstOrNull { position >= it.startMs && position < it.endMs }?.text
-                if (sourceText != previousText) {
-                    previousText = sourceText
-                    translatedCaption = if (sourceText.isNullOrBlank()) null else if (!needsTranslation) {
-                        sourceText
-                    } else {
-                        val localText = translator?.let { local ->
-                            try {
-                                local.translate(sourceText)
-                            } catch (error: Throwable) {
-                                if (error is kotlinx.coroutines.CancellationException) throw error
-                                translationError = error.message ?: "On-device translation failed."
-                                null
-                            }
-                        }
-                        if (localText != null) {
-                            localText
-                        } else if (allowCloudFallback) {
-                            try {
-                                cloudCache[sourceText] ?: run {
-                                    val response = Graph.ai.executeCloud(com.viewtube.app.data.AiRequest(
-                                        task = com.viewtube.app.data.AiTask.SUBTITLE_TRANSLATION,
-                                        prompt = "Translate this subtitle from ${java.util.Locale.forLanguageTag(track.languageTag).getDisplayName()} to ${java.util.Locale.forLanguageTag(translationTarget).getDisplayName()}. Return only the translated line.",
-                                        videoTitle = details?.video?.title,
-                                        sourceText = sourceText,
-                                        allowCloud = true
-                                    ))
-                                    response.text.trim().also { cloudCache[sourceText] = it }
-                                }
-                            } catch (error: Throwable) {
-                                if (error is kotlinx.coroutines.CancellationException) throw error
-                                translationError = error.message ?: "Online AI translation failed."
-                                sourceText
-                            }
-                        } else {
-                            sourceText
-                        }
-                    }
-                }
-                kotlinx.coroutines.delay(180)
-            }
-        } catch (error: Throwable) {
-            if (error is kotlinx.coroutines.CancellationException) throw error
-            translationError = error.message ?: "Subtitle loading or translation failed."
-            if (translatedCaption == null) translatedCaption = ""
-        } finally {
-            translator?.close()
-        }
-    }
-
     LaunchedEffect(showEqualizer) {
         if (showEqualizer) {
             val effect = PlayerHolder.getEqualizer()
             equalizer = effect
             equalizerActive = runCatching { effect?.enabled == true }.getOrDefault(false)
-            eqLevels = effect?.let { eq -> (0 until eq.numberOfBands.toInt()).map { eq.getBandLevel(it.toShort()).toInt() } }.orEmpty()
         }
     }
 
@@ -308,7 +224,7 @@ fun WatchScreen(
                     PlayerView(c).apply {
                         player = PlayerHolder.player
                         resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                        setShowSubtitleButton(false)
+                        setShowSubtitleButton(true)
                     }
                 },
                 update = { it.player = PlayerHolder.player },
@@ -385,14 +301,6 @@ fun WatchScreen(
                     modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp)
                         .clip(RoundedCornerShape(16.dp)).background(Color(0xCC000000))
                         .padding(horizontal = 12.dp, vertical = 6.dp)
-                )
-            }
-            translatedCaption?.let { caption ->
-                Text(
-                    caption, color = Color.White, fontSize = 12.sp, lineHeight = 15.sp, fontWeight = FontWeight.Normal,
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(horizontal = 22.dp, vertical = 58.dp)
-                        .clip(RoundedCornerShape(10.dp)).background(Color(0xD9000000))
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
                 )
             }
             notice?.let {
@@ -597,68 +505,100 @@ fun WatchScreen(
 
     if (subtitleSheet && dd != null) ModalBottomSheet(onDismissRequest = { subtitleSheet = false }) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
-            SheetTitle("Subtitles & AI translation")
+            SheetTitle("YouTube subtitles")
             Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Show subtitles", fontWeight = FontWeight.Medium)
-                    Text("Display the selected caption track", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Show captions", fontWeight = FontWeight.Medium)
+                    Text("Use the player's native subtitle renderer", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Switch(checked = captionsEnabled, onCheckedChange = { captionsEnabled = it })
+                Switch(
+                    checked = captionsEnabled,
+                    onCheckedChange = {
+                        captionsEnabled = it
+                        PlayerHolder.setSubtitlesEnabled(it)
+                    }
+                )
             }
             if (dd.subtitles.isEmpty()) {
-                Text("No subtitle tracks are available for this video.", modifier = Modifier.padding(vertical = 8.dp),
-                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "YouTube did not provide caption tracks for this video.",
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             } else {
-                SheetTitle("Caption language")
+                SheetTitle("Original YouTube caption track")
                 dd.subtitles.forEach { track ->
-                    SheetRow(track.languageName + if (track.autoGenerated) " · auto" else "", selectedSubtitleTrack?.url == track.url) {
-                        selectedSubtitleTrack = track
-                    }
+                    SheetRow(
+                        track.languageName + if (track.autoGenerated) " · auto-generated" else "",
+                        selectedSubtitleTrack?.url == track.url
+                    ) { selectedSubtitleTrack = track }
                 }
                 Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("Translate subtitles", fontWeight = FontWeight.Medium)
-                        Text("On-device first, online AI if needed", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("YouTube auto-translation", fontWeight = FontWeight.Medium)
+                        Text("Request a translated caption track directly from YouTube", fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Switch(checked = translationEnabled, onCheckedChange = { translationEnabled = it })
                 }
                 if (translationEnabled) {
-                    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Allow online AI fallback", fontWeight = FontWeight.Medium)
-                            Text(
-                                if (cloudAiEnabled) "Only used when on-device translation is unavailable"
-                                else "First enable optional cloud AI in Account & settings",
-                                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                    SheetTitle("Translate into")
+                    LazyColumn(Modifier.height(240.dp)) {
+                        items(translationLanguages) { code ->
+                            val label = java.util.Locale.forLanguageTag(code)
+                                .getDisplayName(java.util.Locale.getDefault())
+                            SheetRow(label.replaceFirstChar { it.uppercase() }, translationTarget == code) {
+                                translationTarget = code
+                            }
                         }
-                        Switch(
-                            checked = cloudTranslationEnabled,
-                            onCheckedChange = { cloudTranslationEnabled = it },
-                            enabled = cloudAiEnabled
-                        )
                     }
                 }
-                SheetTitle("Show subtitles in")
-                LazyColumn(Modifier.height(260.dp)) {
-                    items(translationLanguages) { code ->
-                        val label = java.util.Locale.forLanguageTag(code).getDisplayName(java.util.Locale.getDefault())
-                        SheetRow(label.replaceFirstChar { it.uppercase() }, translationTarget == code) { translationTarget = code }
-                    }
+                Text(
+                    "Translation is served by YouTube's caption service. It depends on the selected source track and whether YouTube supports that language for this video.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+                OutlinedButton(
+                    onClick = {
+                        val position = PlayerHolder.player.currentPosition
+                        val wasPlaying = PlayerHolder.player.playWhenReady
+                        runCatching {
+                            PlayerHolder.play(
+                                dd,
+                                wantedHeight = height.takeIf { it > 0 } ?: PlayerHolder.defaultHeight(dd),
+                                startMs = position,
+                                audioTrackId = audioSel,
+                                subtitleSourceUrl = selectedSubtitleTrack?.url,
+                                subtitleTargetLanguage = translationTarget.takeIf { translationEnabled },
+                            )
+                            PlayerHolder.setSubtitlesEnabled(captionsEnabled)
+                            if (!wasPlaying) PlayerHolder.player.pause()
+                        }.onFailure { error = errorText(it) }
+                        subtitleSheet = false
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (translationEnabled) "Apply YouTube auto-translation" else "Apply original captions")
                 }
             }
-            translationError?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp)) }
         }
     }
 
     if (showEqualizer) ModalBottomSheet(onDismissRequest = { showEqualizer = false }) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
             Text("Audio equalizer", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-            Text("Live equalizer on the player's audio session. Changes apply while the video keeps playing.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
+            Text(
+                "Choose from 15 prebuilt sound profiles. No manual frequency bands.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+            )
             val eq = equalizer
             if (eq == null) {
-                Text("The device did not provide an equalizer for this playback session.", color = MaterialTheme.colorScheme.error)
+                Text("This device has no available equalizer for the current playback session.",
+                    color = MaterialTheme.colorScheme.error)
             } else {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                     Text("Equalizer enabled", modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium)
@@ -666,46 +606,20 @@ fun WatchScreen(
                         equalizerActive = PlayerHolder.setEqualizerEnabled(enabled)
                     })
                 }
-                if (eq.numberOfPresets.toInt() > 0) {
-                    Text("Presets", fontWeight = FontWeight.Medium)
-                    LazyColumn(Modifier.height(150.dp)) {
-                        items((0 until eq.numberOfPresets.toInt()).toList()) { index ->
-                            val name = runCatching { eq.getPresetName(index.toShort()).toString() }.getOrDefault("Preset $index")
-                            SheetRow(name, false) {
-                                runCatching {
-                                    PlayerHolder.applyEqualizerPreset(index)
-                                    eqLevels = (0 until eq.numberOfBands.toInt()).map { eq.getBandLevel(it.toShort()).toInt() }
-                                }
+                SheetTitle("Sound profiles")
+                LazyColumn(Modifier.height(360.dp)) {
+                    items((0 until eq.numberOfPresets.toInt()).toList()) { index ->
+                        SheetRow(eq.getPresetName(index.toShort()), eq.activePreset == index) {
+                            if (PlayerHolder.applyEqualizerPreset(index)) {
+                                equalizerActive = PlayerHolder.setEqualizerEnabled(true)
                             }
                         }
                     }
                 }
-                Text("Frequency bands", fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
-                (0 until eq.numberOfBands.toInt()).forEach { index ->
-                    val range = eq.bandLevelRange
-                    val current = eqLevels.getOrNull(index) ?: eq.getBandLevel(index.toShort()).toInt()
-                    val frequency = runCatching { eq.getCenterFreq(index.toShort()) / 1000 }.getOrDefault(0)
-                    Column(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-                        Text("${frequency} Hz · ${(current / 100f).toInt()} dB", fontSize = 12.sp)
-                        Slider(
-                            value = current / 100f,
-                            onValueChange = { value ->
-                                val level = (value * 100f).toInt()
-                                if (PlayerHolder.setEqualizerBand(index, level)) {
-                                    eqLevels = eqLevels.toMutableList().also { list ->
-                                        while (list.size <= index) list.add(0)
-                                        list[index] = level
-                                    }
-                                }
-                            },
-                            valueRange = (range[0] / 100f)..(range[1] / 100f)
-                        )
-                    }
-                }
-                OutlinedButton(onClick = {
-                    equalizerActive = PlayerHolder.setEqualizerEnabled(false)
-                    showEqualizer = false
-                }, modifier = Modifier.fillMaxWidth()) { Text("Turn off equalizer") }
+                OutlinedButton(
+                    onClick = { equalizerActive = PlayerHolder.setEqualizerEnabled(false) },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Turn off equalizer") }
             }
         }
     }
