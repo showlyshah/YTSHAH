@@ -183,7 +183,7 @@ fun HomeScreen(
                 val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
                 if (granted) scope.launch { localArea = LocationRecommendations.refresh(context) }
                 else locationPermission.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
-            }) { Text(if (localArea == null) "Use my area for recommendations" else "Nearby: $localArea") }
+            }) { Text(if (localArea == null) "Use my area for recommendations" else "Area: $localArea") }
         }
         CategoryChips(category, { selected -> category = selected; scope.launch { list.scrollToItem(0) } })
         PullToRefreshBox(isRefreshing = refreshing, onRefresh = { refreshing = true; reload++ }, modifier = Modifier.fillMaxSize()) {
