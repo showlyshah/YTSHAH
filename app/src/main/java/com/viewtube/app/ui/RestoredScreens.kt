@@ -42,6 +42,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import com.viewtube.app.data.ChannelItem
+import com.viewtube.app.data.FILTER_CHANNELS
+import com.viewtube.app.data.LocationRecommendations
 import com.viewtube.app.data.FeedDiagnostics
 import com.viewtube.app.data.Graph
 import com.viewtube.app.data.Paged
@@ -104,7 +107,13 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
         val started = android.os.SystemClock.elapsedRealtime()
         runCatching {
             kotlinx.coroutines.withTimeout(30_000) {
-                Graph.repo.shorts(Graph.store.subs.value.map { it.url })
+                val localChannels = LocationRecommendations.area?.let { area ->
+                    runCatching {
+                        Graph.repo.search("shorts creators $area", FILTER_CHANNELS).items
+                            .filterIsInstance<ChannelItem>().map { it.url }.take(5)
+                    }.getOrDefault(emptyList())
+                }.orEmpty()
+                Graph.repo.shorts(localChannels + Graph.store.subs.value.map { it.url })
             }
         }.onSuccess { page ->
             videos = page.items.distinctBy { it.id }
