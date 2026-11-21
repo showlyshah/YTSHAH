@@ -240,9 +240,9 @@ object PlayerHolder {
             .filter { it > 0 }.distinct().sortedDescending()
 
     /** The user's preferred height, else 480p on mobile data and 720p on Wi-Fi. */
-    fun defaultHeight(d: VideoDetails): Int {
+    fun defaultHeight(d: VideoDetails, preferredHeight: Int = Graph.store.preferredHeight.value): Int {
         val all = heights(d)
-        val pref = Graph.store.preferredHeight.value
+        val pref = preferredHeight
         if (pref == -1) return all.firstOrNull() ?: 0 // Explicit Max available always wins over Data Saver.
         val target = if (pref > 0) pref else if (Graph.store.dataSaver.value || isMetered()) 360 else (all.firstOrNull() ?: 720)
         return all.firstOrNull { it <= target } ?: all.lastOrNull() ?: 0
@@ -259,13 +259,13 @@ object PlayerHolder {
             .map { (it.audioTrackId ?: "") to (it.audioTrackName ?: it.audioLocale?.displayName ?: it.audioTrackId ?: "Track") }
             .let { if (it.size > 1) it else emptyList() }
 
-    private fun bestAudio(list: List<AudioStream>, trackId: String?): AudioStream? {
+    private fun bestAudio(list: List<AudioStream>, trackId: String?, preferredBitrate: Int = Graph.store.preferredAudioBitrate.value): AudioStream? {
         val playable = list.filter { it.deliveryMethod != DeliveryMethod.TORRENT }
         val chosen = if (trackId != null) playable.filter { it.audioTrackId == trackId } else emptyList()
         val original = chosen.ifEmpty {
             playable.filter { it.audioTrackType == null || it.audioTrackType?.name == "ORIGINAL" }.ifEmpty { playable }
         }
-        val preferred = Graph.store.preferredAudioBitrate.value
+        val preferred = preferredBitrate
         val bitrateChoice = if (preferred <= 0) original.maxByOrNull { it.averageBitrate }
             else original.filter { it.averageBitrate <= preferred }.maxByOrNull { it.averageBitrate }
                 ?: original.minByOrNull { it.averageBitrate }
@@ -324,8 +324,8 @@ object PlayerHolder {
             return HlsMediaSource.Factory(sourceFactory())
                 .createMediaSource(item.buildUpon().setUri(d.hlsUrl).build())
         }
-        val audio = bestAudio(d.audio, null)
-        val wantedHeight = defaultHeight(d)
+        val audio = bestAudio(d.audio, null, Graph.store.shortsAudioBitrate.value)
+        val wantedHeight = defaultHeight(d, Graph.store.shortsHeight.value)
         val videoOnly = bestVideo(d.videoOnly, wantedHeight)
         val muxed = bestVideo(d.muxed, wantedHeight)
         val chosen: MediaSource? = when {
