@@ -527,9 +527,28 @@ fun WatchScreen(
                 }
                 Switch(
                     checked = captionsEnabled,
-                    onCheckedChange = {
-                        captionsEnabled = it
-                        PlayerHolder.setSubtitlesEnabled(it)
+                    onCheckedChange = { enabled ->
+                        captionsEnabled = enabled
+                        PlayerHolder.setSubtitlesEnabled(enabled)
+                        if (enabled) {
+                            PlayerHolder.setSubtitleSelection(
+                                SubtitleSelection(
+                                    sourceUrl = selectedSubtitleTrack?.url,
+                                    targetLanguage = translationTarget.takeIf { translationEnabled },
+                                )
+                            )
+                            val position = PlayerHolder.player.currentPosition
+                            val wasPlaying = PlayerHolder.player.playWhenReady
+                            runCatching {
+                                PlayerHolder.play(
+                                    dd,
+                                    wantedHeight = height.takeIf { it > 0 } ?: PlayerHolder.defaultHeight(dd),
+                                    startMs = position,
+                                    audioTrackId = audioSel,
+                                )
+                                if (!wasPlaying) PlayerHolder.player.pause()
+                            }.onFailure { error = errorText(it) }
+                        }
                     }
                 )
             }
