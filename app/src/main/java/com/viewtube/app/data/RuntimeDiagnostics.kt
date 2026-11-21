@@ -65,7 +65,7 @@ object RuntimeDiagnostics {
                 for (i in first until events.length()) trimmed.put(events.getJSONObject(i))
                 // commit() is intentional: a crash immediately after this event should not
                 // silently lose the most recent diagnostic entries.
-                prefs.edit().putString(KEY_EVENTS, trimmed.toString()).commit()
+                prefs.edit().putString(KEY_EVENTS, trimmed.toString()).apply()
             }
         }
     }
