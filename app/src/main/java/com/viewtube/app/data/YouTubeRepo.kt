@@ -99,7 +99,18 @@ class YouTubeRepo(private val http: OkHttpClient) {
     suspend fun shorts(seedChannelUrls: List<String> = emptyList()): Paged<VideoItem> = coroutineScope {
         val queryPages = listOf("shorts", "#shorts", "youtube shorts", "viral shorts").map { query ->
             async(Dispatchers.IO) {
-                runCatching { search(query) }.getOrNull()
+                val started = android.os.SystemClock.elapsedRealtime()
+                val result = runCatching { search(query) }
+                result.onSuccess { page ->
+                    val count = page.items.filterIsInstance<VideoItem>().size
+                    FeedDiagnostics.record("shorts", "search:$query", if (count == 0) "empty" else "success",
+                        android.os.SystemClock.elapsedRealtime() - started, count,
+                        detail = "rawItems=${page.items.size}, hasContinuation=${page.next != null}")
+                }.onFailure {
+                    FeedDiagnostics.record("shorts", "search:$query", "failure",
+                        android.os.SystemClock.elapsedRealtime() - started, error = it)
+                }
+                result.getOrNull()
             }
         }.awaitAll().filterNotNull().map(::shortsSearchPage)
 
@@ -108,19 +119,38 @@ class YouTubeRepo(private val http: OkHttpClient) {
         // dedicated Shorts queries already returned a useful first page.
         if (directItems.size >= 6) return@coroutineScope combineShortsPages(queryPages)
 
-        val popular = runCatching { trending() }.getOrDefault(emptyList())
+        val popularStarted = android.os.SystemClock.elapsedRealtime()
+        val popularResult = runCatching { trending() }
+        popularResult.onSuccess { FeedDiagnostics.record("shorts", "fallback-trending", if (it.isEmpty()) "empty" else "success",
+            android.os.SystemClock.elapsedRealtime() - popularStarted, it.size) }
+            .onFailure { FeedDiagnostics.record("shorts", "fallback-trending", "failure",
+                android.os.SystemClock.elapsedRealtime() - popularStarted, error = it) }
+        val popular = popularResult.getOrDefault(emptyList())
         val channelUrls = (seedChannelUrls + popular.mapNotNull { it.channelUrl } +
             directItems.mapNotNull { it.channelUrl })
             .filter { it.isNotBlank() }.distinct().take(8)
+        FeedDiagnostics.record("shorts", "fallback-channel-discovery", if (channelUrls.isEmpty()) "empty" else "started",
+            itemCount = channelUrls.size, detail = "seedChannels=${seedChannelUrls.size}, searchVideos=${directItems.size}")
 
         val gate = Semaphore(4)
         val channelPages = channelUrls.map { url ->
             async(Dispatchers.IO) {
-                gate.withPermit { runCatching { channelShorts(url) }.getOrNull() }
+                gate.withPermit {
+                    val started = android.os.SystemClock.elapsedRealtime()
+                    val result = runCatching { channelShorts(url) }
+                    result.onSuccess { FeedDiagnostics.record("shorts", "channel-tab", if (it.items.isEmpty()) "empty" else "success",
+                        android.os.SystemClock.elapsedRealtime() - started, it.items.size, detail = "channelUrl=[redacted]") }
+                        .onFailure { FeedDiagnostics.record("shorts", "channel-tab", "failure",
+                            android.os.SystemClock.elapsedRealtime() - started, error = it, detail = "channelUrl=[redacted]") }
+                    result.getOrNull()
+                }
             }
         }.awaitAll().filterNotNull()
 
-        combineShortsPages(queryPages + channelPages)
+        val combined = combineShortsPages(queryPages + channelPages)
+        FeedDiagnostics.record("shorts", "combined-discovery", if (combined.items.isEmpty()) "empty" else "success",
+            itemCount = combined.items.size, detail = "searchSources=${queryPages.size}, channelSources=${channelPages.size}")
+        combined
     }
 
     private fun shortsSearchPage(page: Paged<Item>): Paged<VideoItem> {
