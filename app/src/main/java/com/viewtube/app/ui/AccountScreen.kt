@@ -36,12 +36,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.viewtube.app.data.Graph
+import com.viewtube.app.CrashReportRecorder
 import com.viewtube.app.data.SubscriptionImport
 import com.viewtube.app.player.PlayerHolder
 import com.viewtube.app.data.errorText
@@ -52,6 +55,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun AccountScreen(onBack: () -> Unit) {
     val ctx = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     val store = Graph.store
     val name by store.profileName.collectAsStateCompat()
@@ -82,6 +86,7 @@ fun AccountScreen(onBack: () -> Unit) {
     var aiModel by remember { mutableStateOf(Graph.secure.get(com.viewtube.app.data.OpenAiCompatibleProvider.KEY_MODEL) ?: com.viewtube.app.data.OpenAiCompatibleProvider.DEFAULT_MODEL) }
     var aiKey by remember { mutableStateOf("") }
     var cacheBytes by remember { mutableStateOf(PlayerHolder.playbackCacheBytes()) }
+    var crashReport by remember { mutableStateOf(CrashReportRecorder.read(ctx)) }
 
     val diagnosticExport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -314,14 +319,39 @@ fun AccountScreen(onBack: () -> Unit) {
             )
         }
 
-        Section("Diagnostics") {
+        Section("Diagnostics & crash reports") {
             Text(
-                "${Graph.diagnostics.read().size} recent redacted diagnostic events stored locally.",
+                "${Graph.diagnostics.read().size} recent redacted diagnostic events stored locally. Fatal crashes are saved automatically on this device.",
                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { diagnosticExport.launch("viewtube-diagnostics.json") }) { Text("Export report") }
+                OutlinedButton(onClick = { diagnosticExport.launch("viewtube-diagnostics.json") }) { Text("Export diagnostics") }
                 OutlinedButton(onClick = { Graph.diagnostics.clear(); status = "Diagnostic history cleared." }) { Text("Clear logs") }
+            }
+            Text(
+                if (crashReport != null) "A saved crash report is ready to copy and paste into the bug conversation."
+                else "No fatal crash report has been recorded on this installation yet.",
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    enabled = crashReport != null,
+                    onClick = {
+                        val report = crashReport ?: CrashReportRecorder.read(ctx)
+                        if (report != null) {
+                            clipboard.setText(AnnotatedString(report))
+                            status = "Crash report copied. Paste it into the bug conversation."
+                        } else status = "No crash report is available."
+                    }
+                ) { Text("Copy crash report") }
+                OutlinedButton(
+                    enabled = crashReport != null,
+                    onClick = {
+                        CrashReportRecorder.clear(ctx)
+                        crashReport = null
+                        status = "Saved crash report cleared."
+                    }
+                ) { Text("Clear crash report") }
             }
         }
 
