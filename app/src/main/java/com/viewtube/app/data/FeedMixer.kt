@@ -26,7 +26,7 @@ class FeedMixer(
             turn++
             val startedAt = android.os.SystemClock.elapsedRealtime()
             val page = try {
-                val loaded = if (!c.started) repo.search(c.topic)
+                val loaded = if (!c.started) repo.search(c.topic, FILTER_VIDEOS)
                 else c.next?.invoke() ?: run {
                     cursors.remove(c)
                     null
