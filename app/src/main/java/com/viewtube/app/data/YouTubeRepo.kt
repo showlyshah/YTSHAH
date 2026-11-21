@@ -81,6 +81,35 @@ class YouTubeRepo(private val http: OkHttpClient) {
         ex.initialPage.items.filterIsInstance<StreamInfoItem>().mapNotNull { it.toVideo() }
     }
 
+    /**
+     * Shorts use a dedicated video search and strict extractor metadata filtering.
+     * Never fill an empty Shorts feed with ordinary trending videos: that made the
+     * Shorts tab look populated while showing the wrong content.
+     */
+    suspend fun shorts(): Paged<VideoItem> = io {
+        val handler = yt.searchQHFactory.fromQuery("shorts", listOf(FILTER_VIDEOS), "")
+        val info = SearchInfo.getInfo(yt, handler)
+        shortsPaged(handler, info.relatedItems, info.nextPage)
+    }
+
+    private fun shortsPaged(
+        handler: SearchQueryHandler,
+        items: List<InfoItem>,
+        next: Page?,
+    ): Paged<VideoItem> = Paged(
+        items.filterIsInstance<StreamInfoItem>()
+            .mapNotNull { it.toVideo() }
+            .filter { it.isShort },
+        next?.let { page ->
+            suspend {
+                io {
+                    val more = SearchInfo.getMoreItems(yt, handler, page)
+                    shortsPaged(handler, more.items, more.nextPage)
+                }
+            }
+        }
+    )
+
     // ----------------------------------------------------------------- video
 
     suspend fun details(id: String): VideoDetails = io {
