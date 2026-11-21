@@ -1,7 +1,7 @@
 package com.viewtube.app.data
 
 /** Tasks supported by the optional hybrid intelligence layer. */
-enum class AiTask { TOPIC_CLASSIFICATION, VIDEO_SUMMARY, VIDEO_QUESTION, SMART_SEARCH, DIAGNOSTIC_ANALYSIS }
+enum class AiTask { TOPIC_CLASSIFICATION, VIDEO_SUMMARY, VIDEO_QUESTION, SMART_SEARCH, DIAGNOSTIC_ANALYSIS, SUBTITLE_TRANSLATION }
 
 data class AiRequest(
     val task: AiTask,
@@ -47,5 +47,13 @@ class HybridAiCoordinator(
             }
         }
         return runCatching { local.execute(request) }.getOrNull()
+    }
+
+    /** Cloud-only path for user-approved tasks that must not silently return untranslated text. */
+    suspend fun executeCloud(request: AiRequest): AiResponse {
+        require(request.allowCloud) { "Online AI was not approved for this request." }
+        require(cloudEnabled()) { "Enable optional cloud AI in Account & settings first." }
+        val provider = cloudProvider() ?: error("No online AI provider is configured.")
+        return provider.execute(request)
     }
 }
