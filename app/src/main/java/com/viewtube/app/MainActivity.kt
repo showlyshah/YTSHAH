@@ -97,6 +97,11 @@ class MainActivity : ComponentActivity() {
         pendingVideo = videoFromIntent(intent)
     }
 
+    override fun onDestroy() {
+        window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        super.onDestroy()
+    }
+
     private fun videoFromIntent(i: Intent?): String? {
         i ?: return null
         val text = when (i.action) {
@@ -129,6 +134,12 @@ class MainActivity : ComponentActivity() {
         val route = backStack?.destination?.route.orEmpty()
         onWatchScreen = route.startsWith("watch/")
         val playing by PlayerHolder.playing.collectAsStateCompat()
+
+        // Keep the display awake only while a video is actively playing in the foreground.
+        LaunchedEffect(playing) {
+            if (playing) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
 
         LaunchedEffect(playing, onWatchScreen) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
