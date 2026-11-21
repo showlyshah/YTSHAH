@@ -84,11 +84,10 @@ class YouTubeRepo(private val http: OkHttpClient) {
      * after YouTube's renderer changes, leaving the home feed empty.
      */
     suspend fun trending(): List<VideoItem> = coroutineScope {
-        listOf("popular videos", "trending videos", "viral videos").map { query ->
+        // Match the unfiltered query path used by the Search screen; filter to video items locally.
+        listOf("popular", "trending", "viral videos").map { query ->
             async(Dispatchers.IO) {
-                runCatching {
-                    search(query, FILTER_VIDEOS).items.filterIsInstance<VideoItem>()
-                }.getOrDefault(emptyList())
+                runCatching { search(query).items.filterIsInstance<VideoItem>() }.getOrDefault(emptyList())
             }
         }.awaitAll().flatten().distinctBy { it.id }
     }
@@ -98,9 +97,9 @@ class YouTubeRepo(private val http: OkHttpClient) {
      * depend on trending succeeding or on the user already having subscriptions.
      */
     suspend fun shorts(seedChannelUrls: List<String> = emptyList()): Paged<VideoItem> = coroutineScope {
-        val queryPages = listOf("#shorts", "shorts", "viral shorts", "funny shorts").map { query ->
+        val queryPages = listOf("shorts", "#shorts", "youtube shorts", "viral shorts").map { query ->
             async(Dispatchers.IO) {
-                runCatching { search(query, FILTER_VIDEOS) }.getOrNull()
+                runCatching { search(query) }.getOrNull()
             }
         }.awaitAll().filterNotNull().map(::shortsSearchPage)
 
