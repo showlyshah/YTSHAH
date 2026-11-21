@@ -204,8 +204,6 @@ class YouTubeRepo(private val http: OkHttpClient) {
             audio = info.audioStreams.orEmpty(),
             related = info.relatedItems.orEmpty().filterIsInstance<StreamInfoItem>().mapNotNull { it.toVideo() },
         )
-            },
-        )
     }
 
     // -------------------------------------------------------------- comments
