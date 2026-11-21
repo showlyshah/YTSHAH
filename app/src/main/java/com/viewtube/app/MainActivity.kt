@@ -45,6 +45,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.viewtube.app.data.videoIdFromUrl
+import com.viewtube.app.data.RuntimeDiagnostics
 import com.viewtube.app.player.PlayerHolder
 import com.viewtube.app.ui.ChannelScreen
 import com.viewtube.app.ui.CreatorsScreen
@@ -83,9 +84,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        RuntimeDiagnostics.record("ACTIVITY", "onCreate", "started", "savedState=${savedInstanceState != null}, intentAction=${intent?.action ?: "none"}")
         enableEdgeToEdge()
         pendingVideo = videoFromIntent(intent)
 
+        RuntimeDiagnostics.record("ACTIVITY", "setContent", "started")
         setContent {
             ViewTubeTheme {
                 Surface(Modifier.fillMaxSize()) {
@@ -106,6 +109,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         activityResumed = true
+        RuntimeDiagnostics.record("ACTIVITY", "onResume", "ok")
         PlayerHolder.player.addListener(playbackAwakeListener)
         // Keep the display awake only while media is actively playing in the foreground.
         updateKeepScreenOn(PlayerHolder.player.isPlaying || PlayerHolder.player.playWhenReady)
@@ -113,6 +117,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         activityResumed = false
+        RuntimeDiagnostics.record("ACTIVITY", "onStop", "ok", "watchScreen=$onWatchScreen")
         PlayerHolder.player.removeListener(playbackAwakeListener)
         window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         super.onStop()
@@ -122,6 +127,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         pendingVideo = videoFromIntent(intent)
+        RuntimeDiagnostics.record("ACTIVITY", "onNewIntent", "ok", "action=${intent.action}, videoLinkDetected=${pendingVideo != null}")
     }
 
     private fun videoFromIntent(i: Intent?): String? {
@@ -150,6 +156,9 @@ class MainActivity : ComponentActivity() {
         val backStack by nav.currentBackStackEntryAsState()
         val route = backStack?.destination?.route.orEmpty()
         onWatchScreen = route.startsWith("watch/")
+        LaunchedEffect(route) {
+            RuntimeDiagnostics.record("NAVIGATION", "destination-changed", "ok", "route=${route.substringBefore('/')}")
+        }
 
         LaunchedEffect(pendingVideo) {
             pendingVideo?.let { nav.navigate("watch/$it"); pendingVideo = null }
