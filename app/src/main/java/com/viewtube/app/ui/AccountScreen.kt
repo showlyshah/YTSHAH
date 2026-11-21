@@ -169,7 +169,12 @@ fun AccountScreen(onBack: () -> Unit) {
         }
     }
 
-    if (showAbout) { AboutScreen(onBack = { showAbout = false }); return }\n\n    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 32.dp)) {
+    if (showAbout) {
+        AboutScreen(onBack = { showAbout = false })
+        return
+    }
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 32.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
             Text("Account & settings", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
@@ -506,6 +511,8 @@ private fun ToggleRow(title: String, subtitle: String?, checked: Boolean, onChan
 
 @Composable
 private fun AboutScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    val versionName = runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "unknown"
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 32.dp)
     ) {
