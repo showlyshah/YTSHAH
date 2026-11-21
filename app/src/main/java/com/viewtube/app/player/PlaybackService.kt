@@ -18,6 +18,7 @@ import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.viewtube.app.R
+import com.viewtube.app.data.RuntimeDiagnostics
 
 /** Keeps audio playing in the background and shows the lock-screen / notification controls. */
 @UnstableApi
@@ -37,6 +38,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        RuntimeDiagnostics.record("PLAYBACK_SERVICE", "onCreate", "started")
         // Promote as early as possible. The same id is reused by Media3's media
         // notification so this placeholder is replaced rather than duplicated.
         promoteToForeground()
@@ -100,6 +102,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        RuntimeDiagnostics.record("PLAYBACK_SERVICE", "onStartCommand", "received", "startId=$startId, intentAction=${intent?.action ?: "none"}")
         promoteToForeground()
         return super.onStartCommand(intent, flags, startId)
     }
@@ -130,6 +133,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        RuntimeDiagnostics.record("PLAYBACK_SERVICE", "onDestroy", "started")
         stopForeground(STOP_FOREGROUND_REMOVE)
         session?.release()
         session = null
