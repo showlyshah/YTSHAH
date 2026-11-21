@@ -110,36 +110,12 @@ fun AccountScreen(onBack: () -> Unit) {
             Text("${subs.size} subscriptions on this device", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
-        Section("Sync across devices (optional)") {
-            if (pipedUser != null) {
-                Text("Signed in as $pipedUser", fontWeight = FontWeight.Medium)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(enabled = !busy, onClick = {
-                        scope.launch {
-                            busy = true
-                            status = runCatching { "Synced. ${Graph.piped.sync()} new channel(s)." }.getOrElse { errorText(it) }
-                            busy = false
-                        }
-                    }) { Text("Sync now") }
-                    OutlinedButton(onClick = { Graph.piped.signOut(); status = "Signed out." }) { Text("Sign out") }
-                }
-            } else {
-                Text(
-                    "Sign in with a Piped account to keep your subscriptions on all your devices. " +
-                        "This is a separate account, not your Google login. Google doesn't allow other apps to " +
-                        "sign in to YouTube, and you should never type your Google password into one.",
-                    fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                OutlinedTextField(serverField, { serverField = it }, label = { Text("Piped server") }, singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(user, { user = it }, label = { Text("Username") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(pass, { pass = it }, label = { Text("Password") }, singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(enabled = !busy, onClick = { auth(false) }) { Text(if (busy) "Please wait..." else "Sign in") }
-                    OutlinedButton(enabled = !busy, onClick = { auth(true) }) { Text("Create account") }
-                }
-            }
+        Section("Account compatibility") {
+            Text(
+                "ViewTube currently uses NewPipeExtractor for public video and channel data. It does not sign in to your Google or YouTube account, and it will never ask you to enter a Google password here. " +
+                    "microG/GmsCore is a Google Play Services compatibility layer, not a drop-in YouTube login API. A supported account feature needs a proper, user-consented OAuth integration; it must not impersonate the official YouTube app or bypass age, region, membership or other access restrictions.",
+                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
 
         Section("Bring your YouTube subscriptions") {
