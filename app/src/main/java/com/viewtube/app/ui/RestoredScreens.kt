@@ -73,25 +73,19 @@ fun MiniPlayer(onOpen: (String) -> Unit) {
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
     var videos by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
     var nextPage by remember { mutableStateOf<(suspend () -> Paged<VideoItem>)?>(null) }
     var loading by remember { mutableStateOf(true) }
     var loadingMore by remember { mutableStateOf(false) }
-    var activeLoading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var activeError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    val pagerState = rememberPagerState(pageCount = { videos.size })
-    val activeVideo = videos.getOrNull(pagerState.currentPage)
-    val playing by PlayerHolder.playing.collectAsStateCompat()
 
     LaunchedEffect(Unit) {
         runCatching { Graph.repo.shorts() }
             .onSuccess { page ->
-                videos = page.items.filter { it.isShort }.distinctBy { it.id }
+                videos = page.items.distinctBy { it.id }
                 nextPage = page.next
                 error = null
             }
@@ -106,7 +100,7 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
             loadingMore = true
             runCatching { fetch() }
                 .onSuccess { page ->
-                    videos = (videos + page.items.filter { it.isShort }).distinctBy { it.id }
+                    videos = (videos + page.items).distinctBy { it.id }
                     nextPage = page.next
                     error = null
                 }
@@ -115,108 +109,34 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
         }
     }
 
-    LaunchedEffect(activeVideo?.id) {
-        val selected = activeVideo ?: return@LaunchedEffect
-        activeLoading = true
-        activeError = null
-        try {
-            val details = Graph.repo.details(selected.id)
-            if (activeVideo?.id == selected.id) PlayerHolder.play(details)
-        } catch (t: Throwable) {
-            if (t is kotlinx.coroutines.CancellationException) throw t
-            activeError = t.message ?: "This Short could not be played."
-        } finally {
-            activeLoading = false
-        }
-    }
-
-    LaunchedEffect(pagerState.currentPage, videos.size) {
-        if (videos.isNotEmpty() && pagerState.currentPage >= videos.lastIndex - 1) loadMore()
-    }
-
-    when {
-        loading -> Loading()
-        videos.isEmpty() -> Message("No Shorts found", error ?: "The source did not return any videos identified as Shorts.")
-        else -> Box(Modifier.fillMaxSize().background(Color.Black)) {
-            VerticalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxSize(),
-                key = { index -> videos[index].id }
-            ) { page ->
-                val video = videos[page]
-                Box(Modifier.fillMaxSize().background(Color.Black)) {
-                    if (page == pagerState.currentPage) {
-                        AndroidView(
-                            factory = { context ->
-                                PlayerView(context).apply {
-                                    player = PlayerHolder.player
-                                    useController = false
-                                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                                }
-                            },
-                            update = { it.player = PlayerHolder.player },
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        AsyncImage(
-                            model = video.thumbnail,
-                            contentDescription = video.title,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-                    Column(
-                        Modifier.align(Alignment.BottomStart).fillMaxWidth()
-                            .background(Color(0x99000000)).padding(start = 18.dp, end = 18.dp, top = 48.dp, bottom = 26.dp)
-                    ) {
-                        Text(video.title, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 3)
-                        Text(
-                            video.channelName,
-                            color = Color.White.copy(alpha = 0.82f),
-                            fontSize = 13.sp,
-                            modifier = Modifier.padding(top = 6.dp).clickable {
-                                video.channelUrl?.let(onChannel)
-                            }
-                        )
-                        Row(
-                            Modifier.fillMaxWidth().padding(top = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                if (activeLoading && page == pagerState.currentPage) "Loading Short…" else activeError ?: "",
-                                color = Color.White.copy(alpha = 0.9f),
-                                fontSize = 12.sp,
-                                modifier = Modifier.weight(1f)
-                            )
-                            IconButton(onClick = { PlayerHolder.toggle() }) {
-                                Icon(
-                                    if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                    contentDescription = if (playing) "Pause" else "Play",
-                                    tint = Color.White
-                                )
-                            }
-                            Button(onClick = { onVideo(video) }) { Text("Details") }
-                        }
-                    }
-                    if (page == 0) {
-                        Text(
-                            "SHORTS  ·  Swipe up for next",
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            modifier = Modifier.align(Alignment.TopStart).padding(18.dp)
-                                .background(Color(0x77000000), RoundedCornerShape(18.dp))
-                                .padding(horizontal = 12.dp, vertical = 8.dp)
-                        )
-                    }
+    Column(Modifier.fillMaxSize()) {
+        TopBar(onSearch = {}, onAccount = {})
+        when {
+            loading -> Loading()
+            videos.isEmpty() && nextPage == null ->
+                Message("No Shorts found", error ?: "The source did not return any videos identified as Shorts.")
+            else -> LazyColumn(Modifier.fillMaxSize()) {
+                items(videos, key = { it.id }) { video ->
+                    VideoCard(video, { onVideo(video) }, onChannel)
                 }
-            }
-            if (loadingMore) Text(
-                "Loading more…",
-                color = Color.White,
-                modifier = Modifier.align(Alignment.TopCenter).padding(16.dp)
-            )
-            error?.let {
-                Text(it, color = Color.White, modifier = Modifier.align(Alignment.TopCenter).padding(12.dp))
+                item {
+                    if (nextPage != null) {
+                        Button(
+                            onClick = { loadMore() },
+                            enabled = !loadingMore,
+                            modifier = Modifier.fillMaxWidth().padding(16.dp)
+                        ) {
+                            Text(if (loadingMore) "Loading…" else "Load more Shorts")
+                        }
+                    } else if (videos.isNotEmpty()) {
+                        Text(
+                            "You're all caught up",
+                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    error?.let { Text(it, modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error) }
+                }
             }
         }
     }
