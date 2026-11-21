@@ -187,11 +187,12 @@ fun WatchScreen(
         var translator: OnDeviceSubtitleTranslator? = null
         try {
             val cues = Graph.repo.subtitleCues(track)
+            require(cues.isNotEmpty()) { "The selected subtitle track contains no readable caption cues." }
             val sourceLanguage = java.util.Locale.forLanguageTag(track.languageTag).language
             val targetLanguage = java.util.Locale.forLanguageTag(translationTarget).language
             val needsTranslation = translationEnabled && sourceLanguage != targetLanguage
-            val sourceCode = com.google.mlkit.nl.translate.TranslateLanguage.fromLanguageTag(track.languageTag)
-            val targetCode = com.google.mlkit.nl.translate.TranslateLanguage.fromLanguageTag(translationTarget)
+            val sourceCode = com.google.mlkit.nl.translate.TranslateLanguage.fromLanguageTag(sourceLanguage)
+            val targetCode = com.google.mlkit.nl.translate.TranslateLanguage.fromLanguageTag(targetLanguage)
             val localSupported = sourceCode != null && targetCode != null
             if (needsTranslation && localSupported) {
                 translator = runCatching {
@@ -213,7 +214,13 @@ fun WatchScreen(
                         sourceText
                     } else {
                         val localText = translator?.let { local ->
-                            runCatching { local.translate(sourceText) }.getOrNull()
+                            try {
+                                local.translate(sourceText)
+                            } catch (error: Throwable) {
+                                if (error is kotlinx.coroutines.CancellationException) throw error
+                                translationError = error.message ?: "On-device translation failed."
+                                null
+                            }
                         }
                         if (localText != null) {
                             localText
