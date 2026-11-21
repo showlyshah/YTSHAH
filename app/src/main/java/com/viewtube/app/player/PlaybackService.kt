@@ -23,7 +23,7 @@ class PlaybackService : MediaSessionService() {
     @Suppress("DEPRECATION")
     private val stopButton: CommandButton by lazy {
         CommandButton.Builder()
-            .setDisplayName("Stop")
+            .setDisplayName("Close player")
             .setIconResId(R.drawable.ic_stop)
             .setSessionCommand(stopCommand)
             .build()
@@ -65,9 +65,11 @@ class PlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // Swiping the app away ends playback unless audio is still playing in the background.
+        // A playing session remains alive with its foreground media notification.
+        // A paused/idle session is not kept alive after the task is dismissed.
         if (!PlayerHolder.player.playWhenReady) {
             PlayerHolder.stop()
+            stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
         }
     }
