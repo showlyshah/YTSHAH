@@ -32,6 +32,7 @@ class ShortsPlayerController private constructor() {
     }
 
     private val slots = List(SLOT_COUNT) { Slot(PlayerHolder.createShortsPlayer()) }
+    private var focusedSlot = -1
     private val _loading = MutableStateFlow<Set<Int>>(emptySet())
     val loading: StateFlow<Set<Int>> = _loading.asStateFlow()
     private val _failed = MutableStateFlow<Set<String>>(emptySet())
@@ -43,7 +44,7 @@ class ShortsPlayerController private constructor() {
         slots.forEachIndexed { index, slot ->
             slot.player.addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
-                    if (slots.getOrNull(index) === slot && slot.player.playWhenReady) _playing.value = isPlaying
+                    if (index == focusedSlot) _playing.value = isPlaying
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
@@ -74,6 +75,7 @@ class ShortsPlayerController private constructor() {
             videos.getOrNull(index)?.let { ensureLoaded(index, it) }
         }
         val activeSlot = slotOf(page)
+        focusedSlot = activeSlot
         slots.forEachIndexed { index, slot ->
             slot.player.playWhenReady = index == activeSlot && slot.videoId == videos[page].id
         }
@@ -129,6 +131,7 @@ class ShortsPlayerController private constructor() {
             slot.videoId = null
         }
         _loading.value = emptySet()
+        focusedSlot = -1
         _playing.value = false
     }
 
