@@ -2,6 +2,7 @@ package com.viewtube.app.ui
 
 import android.app.Activity
 import android.content.Context
+import android.content.res.Configuration
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import kotlin.OptIn
@@ -51,6 +52,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -93,13 +95,18 @@ fun WatchScreen(
     var details by remember { mutableStateOf<VideoDetails?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var attempt by remember { mutableIntStateOf(0) }
-    var fullscreen by remember { mutableStateOf(false) }
+    var manualFullscreen by remember { mutableStateOf(false) }
+    var dismissedAutoFullscreen by remember { mutableStateOf(false) }
+    val autoLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val fullscreen = manualFullscreen || (autoLandscape && !dismissedAutoFullscreen)
+    var resizeMode by remember { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
     var comments by remember { mutableStateOf<Paged<Comment>?>(null) }
     var commentList by remember { mutableStateOf<List<Comment>>(emptyList()) }
     var loadingComments by remember { mutableStateOf(false) }
     var showDesc by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf(false) }
     val audioSel by PlayerHolder.audioTrack.collectAsStateCompat()
+    val audioBitrate by PlayerHolder.audioBitrate.collectAsStateCompat()
     val speed by PlayerHolder.speed.collectAsStateCompat()
     val prefHeight by Graph.store.preferredHeight.collectAsStateCompat()
     val height by PlayerHolder.height.collectAsStateCompat()
@@ -129,13 +136,14 @@ fun WatchScreen(
         PlayerHolder.advanced.collect { id -> if (id != videoId) onVideo(id) }
     }
 
-    // Fullscreen = landscape + hidden system bars.
-    DisposableEffect(fullscreen) {
+    // Landscape auto-rotation and the manual fullscreen button share one fullscreen layout.
+    LaunchedEffect(autoLandscape) { if (!autoLandscape) dismissedAutoFullscreen = false }
+    DisposableEffect(fullscreen, manualFullscreen) {
         val act = ctx.activity()
         if (act != null) {
             val ctl = WindowInsetsControllerCompat(act.window, act.window.decorView)
             if (fullscreen) {
-                act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                act.requestedOrientation = if (manualFullscreen) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                 ctl.hide(WindowInsetsCompat.Type.systemBars())
                 ctl.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             } else {
@@ -160,19 +168,26 @@ fun WatchScreen(
                 factory = { c ->
                     PlayerView(c).apply {
                         player = PlayerHolder.player
-                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        resizeMode = resizeMode
                         setShowSubtitleButton(false)
-                        setFullscreenButtonClickListener { fullscreen = it }
+                        setControllerShowTimeoutMs(2500)
+                        setFullscreenButtonClickListener { enter ->
+                            if (enter) { manualFullscreen = true; dismissedAutoFullscreen = false }
+                            else { manualFullscreen = false; dismissedAutoFullscreen = true }
+                        }
                     }
                 },
-                update = { it.player = PlayerHolder.player },
+                update = { view -> view.player = PlayerHolder.player; view.resizeMode = resizeMode },
                 modifier = Modifier.fillMaxSize()
             )
             if (!fullscreen) IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart)) {
                 Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Minimize", tint = Color.White)
             }
             IconButton(
-                onClick = { fullscreen = !fullscreen },
+                onClick = {
+                    if (fullscreen) { manualFullscreen = false; dismissedAutoFullscreen = true }
+                    else { manualFullscreen = true; dismissedAutoFullscreen = false }
+                },
                 modifier = Modifier.align(Alignment.TopEnd),
             ) {
                 Icon(
@@ -309,11 +324,32 @@ fun WatchScreen(
                 SheetTitle("Audio track")
                 tracks.forEach { (id, label) ->
                     SheetRow(label, audioSel == id) {
-                        runCatching { PlayerHolder.play(dd, height.takeIf { it > 0 } ?: PlayerHolder.defaultHeight(dd), audioTrackId = id) }
+                        runCatching { PlayerHolder.play(dd, height.takeIf { it > 0 } ?: PlayerHolder.defaultHeight(dd), audioTrackId = id, audioBitrate = 0) }
                             .onFailure { error = errorText(it) }
                         sheet = false
                     }
                 }
+            }
+            val audioQualities = PlayerHolder.audioQualities(dd)
+            if (audioQualities.size > 1) {
+                SheetTitle("Audio quality")
+                audioQualities.forEach { (bitrate, label) ->
+                    SheetRow(label, audioBitrate == bitrate) {
+                        runCatching {
+                            PlayerHolder.play(dd, height.takeIf { it > 0 } ?: PlayerHolder.defaultHeight(dd),
+                                audioTrackId = audioSel, audioBitrate = bitrate)
+                        }.onFailure { error = errorText(it) }
+                        sheet = false
+                    }
+                }
+            }
+            SheetTitle("Screen size")
+            listOf(
+                "Fit" to AspectRatioFrameLayout.RESIZE_MODE_FIT,
+                "Fill" to AspectRatioFrameLayout.RESIZE_MODE_FILL,
+                "Zoom" to AspectRatioFrameLayout.RESIZE_MODE_ZOOM,
+            ).forEach { (label, mode) ->
+                SheetRow(label, resizeMode == mode) { resizeMode = mode; sheet = false }
             }
             SheetTitle("Playback speed")
             listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f).forEach { sp ->
