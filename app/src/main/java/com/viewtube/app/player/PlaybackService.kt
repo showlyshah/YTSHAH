@@ -37,31 +37,9 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-
-        // MediaSessionService normally promotes itself when it observes active playback.
-        // PlayerHolder can start playback just before this service is created, however,
-        // which can miss that initial state transition. Android 14+ requires an immediate
-        // foreground notification after startForegroundService(); post a lightweight
-        // placeholder first, then Media3 can replace it with its media controls notification.
-        ensurePlaybackNotificationChannel()
-        val startupNotification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentTitle(getString(R.string.app_name))
-            .setContentText("Starting playback")
-            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .build()
-        ServiceCompat.startForeground(
-            this,
-            NOTIFICATION_ID,
-            startupNotification,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-            else 0
-        )
-
+        // Promote as early as possible. The same id is reused by Media3's media
+        // notification so this placeholder is replaced rather than duplicated.
+        promoteToForeground()
         session = MediaSession.Builder(this, PlayerHolder.player)
             .setCallback(object : MediaSession.Callback {
                 override fun onConnect(
@@ -92,6 +70,38 @@ class PlaybackService : MediaSessionService() {
             })
             .setCustomLayout(ImmutableList.of(stopButton))
             .build()
+    }
+
+    /**
+     * Android starts its foreground-service deadline when startForegroundService() is
+     * requested. Promote from both lifecycle entry points: onCreate covers initial
+     * creation, while onStartCommand covers each explicit start/restart and guards
+     * against MediaSessionService startup ordering on newer Android releases.
+     */
+    private fun promoteToForeground() {
+        ensurePlaybackNotificationChannel()
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setContentTitle(getString(R.string.app_name))
+            .setContentText("Starting playback")
+            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .build()
+        ServiceCompat.startForeground(
+            this,
+            NOTIFICATION_ID,
+            notification,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            else 0
+        )
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        promoteToForeground()
+        return super.onStartCommand(intent, flags, startId)
     }
 
     private fun ensurePlaybackNotificationChannel() {
