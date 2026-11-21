@@ -239,7 +239,7 @@ class YouTubeRepo(private val http: OkHttpClient) {
             throw t
         }
         RuntimeDiagnostics.record("EXTRACTOR", "video-details-parsed", "success",
-            "videoId=$id, durationMs=${android.os.SystemClock.elapsedRealtime() - started}, videoStreams=${info.videoStreams.orEmpty().size}, videoOnlyStreams=${info.videoOnlyStreams.orEmpty().size}, audioStreams=${info.audioStreams.orEmpty().size}, related=${info.relatedItems.orEmpty().size}, live=${info.isLive}")
+            "videoId=$id, durationMs=${android.os.SystemClock.elapsedRealtime() - started}, videoStreams=${info.videoStreams.orEmpty().size}, videoOnlyStreams=${info.videoOnlyStreams.orEmpty().size}, audioStreams=${info.audioStreams.orEmpty().size}, related=${info.relatedItems.orEmpty().size}, live=${info.streamType == StreamType.LIVE_STREAM || info.streamType == StreamType.AUDIO_LIVE_STREAM}")
         val chUrl = info.uploaderUrl.orEmpty()
         val channel = ChannelItem(
             id = chUrl.substringAfterLast('/'),
@@ -360,6 +360,8 @@ class YouTubeRepo(private val http: OkHttpClient) {
 
     /** Latest uploads from the given channels, newest first, using YouTube's public RSS feeds. */
     suspend fun feed(channelIds: List<String>, perChannel: Int = 6): List<VideoItem> = coroutineScope {
+        val started = android.os.SystemClock.elapsedRealtime()
+        RuntimeDiagnostics.record("EXTRACTOR", "subscriptions-feed-start", "started", "channels=${channelIds.size}, perChannel=$perChannel")
         val gate = Semaphore(8)
         channelIds
             .map { id ->
@@ -370,6 +372,8 @@ class YouTubeRepo(private val http: OkHttpClient) {
             .awaitAll()
             .flatten()
             .sortedByDescending { it.publishedMs }
+            .also { RuntimeDiagnostics.record("EXTRACTOR", "subscriptions-feed-result", if (it.isEmpty()) "empty" else "success",
+                "durationMs=${android.os.SystemClock.elapsedRealtime() - started}, channels=${channelIds.size}, videos=${it.size}") }
     }
 
     private fun rss(channelId: String, limit: Int): List<VideoItem> {
