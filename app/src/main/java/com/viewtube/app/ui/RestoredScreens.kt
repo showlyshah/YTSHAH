@@ -221,7 +221,7 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
                                 color = androidx.compose.ui.graphics.Color.White,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
-                                modifier = Modifier.clickable { onChannel(video.channelUrl) }
+                                modifier = Modifier.clickable(enabled = !video.channelUrl.isNullOrBlank()) { video.channelUrl?.let(onChannel) }
                             )
                             Text(
                                 video.title,
