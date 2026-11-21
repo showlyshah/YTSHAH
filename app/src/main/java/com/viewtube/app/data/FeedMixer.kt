@@ -19,57 +19,26 @@ class FeedMixer(
 
     /** Loads until at least [min] new videos were found (or sources run out). */
     suspend fun more(min: Int = 10): List<VideoItem> {
-        val batchStarted = android.os.SystemClock.elapsedRealtime()
-        RuntimeDiagnostics.record("HOME_MIXER", "batch-start", "started", "minimum=$min, activeTopics=${cursors.size}, alreadySeen=${seen.size}")
         val out = mutableListOf<VideoItem>()
         var failures = 0
         while (out.size < min && cursors.isNotEmpty() && failures < 6) {
             val c = cursors[turn % cursors.size]
             turn++
-            val startedAt = android.os.SystemClock.elapsedRealtime()
-            val page = try {
-                val loaded = if (!c.started) repo.search(c.topic, FILTER_VIDEOS)
-                else c.next?.invoke() ?: run {
-                    cursors.remove(c)
-                    null
-                }
-                if (loaded != null) {
-                    FeedDiagnostics.record("home", "topic:${c.topic}", if (loaded.items.isEmpty()) "empty" else "success",
-                        android.os.SystemClock.elapsedRealtime() - startedAt,
-                        loaded.items.filterIsInstance<VideoItem>().size,
-                        detail = "rawItems=${loaded.items.size}, continuation=${loaded.next != null}")
-                    RuntimeDiagnostics.record("HOME_MIXER", "topic-result", if (loaded.items.isEmpty()) "empty" else "success",
-                        "topic=${c.topic}, durationMs=${android.os.SystemClock.elapsedRealtime() - startedAt}, rawItems=${loaded.items.size}, accepted=${loaded.items.filterIsInstance<VideoItem>().count(accept)}, continuation=${loaded.next != null}")
-                } else {
-                    FeedDiagnostics.record("home", "topic:${c.topic}", "exhausted",
-                        android.os.SystemClock.elapsedRealtime() - startedAt)
-                }
-                loaded
-            } catch (t: Throwable) {
-                if (t is kotlinx.coroutines.CancellationException) throw t
-                // A transient network/HTTP failure must not permanently discard this topic.
-                FeedDiagnostics.record("home", "topic:${c.topic}", "failure",
-                    android.os.SystemClock.elapsedRealtime() - startedAt, error = t)
-                RuntimeDiagnostics.record("HOME_MIXER", "topic-failed", "failure", "topic=${c.topic}", t)
-                failures++
-                null
-            }
+            val page = runCatching {
+                if (!c.started) { c.started = true; repo.search(c.topic, FILTER_VIDEOS) }
+                else c.next?.invoke()
+            }.getOrNull()
             if (page == null) {
-                if (cursors.contains(c) && !c.started) {
-                    // Keep a failed first-page cursor so the next scroll can retry it.
-                    continue
-                }
+                failures++
+                cursors.remove(c)
                 continue
             }
-            c.started = true
             c.next = page.next
             if (page.next == null) cursors.remove(c)
             for (v in page.items.filterIsInstance<VideoItem>()) {
                 if (accept(v) && seen.add(v.id)) out += v
             }
         }
-        RuntimeDiagnostics.record("HOME_MIXER", "batch-finished", if (out.isEmpty()) "empty" else "success",
-            "durationMs=${android.os.SystemClock.elapsedRealtime() - batchStarted}, newItems=${out.size}, remainingTopics=${cursors.size}, exhausted=$exhausted, failures=$failures")
         return out
     }
 }
