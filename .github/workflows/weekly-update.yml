@@ -103,9 +103,9 @@ jobs:
         if: steps.bugs.outputs.keep_going == 'true'
         run: |
           cp app/build/outputs/apk/debug/app-debug.apk ViewTube-test.apk
-          gh release delete test-build --yes --cleanup-tag || true
-          gh release create test-build ViewTube-test.apk \
+          gh release delete viewtube-rebuild-test-build --yes --cleanup-tag || true
+          gh release create viewtube-rebuild-test-build ViewTube-test.apk \
             --prerelease \
             --target "$(git rev-parse HEAD)" \
-            --title "Test build (latest)" \
+            --title "ViewTube rebuild test build" \
             --notes "Weekly automatic build. Extractor: ${{ steps.bump.outputs.extractor }}."
