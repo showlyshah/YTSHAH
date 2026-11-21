@@ -2,7 +2,6 @@ package com.viewtube.app.player
 
 import android.content.Context
 import android.content.Intent
-import android.media.audiofx.Equalizer
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -17,7 +16,6 @@ import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.dash.DashMediaSource
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -94,13 +92,6 @@ object PlayerHolder {
     val skipNotice: StateFlow<String?> = _skipNotice.asStateFlow()
 
     private var segments: List<SponsorBlock.Segment> = emptyList()
-    private var equalizer: Equalizer? = null
-    private var equalizerRange: IntRange = -1500..1500
-    private val _equalizerEnabled = MutableStateFlow(false)
-    val equalizerEnabled: StateFlow<Boolean> = _equalizerEnabled.asStateFlow()
-    private val _equalizerBands = MutableStateFlow<List<Int>>(emptyList())
-    val equalizerBands: StateFlow<List<Int>> = _equalizerBands.asStateFlow()
-    val equalizerBandRange: IntRange get() = equalizerRange
     private var watcher: Job? = null
     private var saver: Job? = null
     private var sleepJob: Job? = null
@@ -114,19 +105,7 @@ object PlayerHolder {
     }
 
     private fun buildPlayer(): ExoPlayer {
-        // Network-aware startup and rebuffer targets; cache remains independently capped.
-        val metered = isMetered()
-        val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(
-                if (metered) 12_000 else 20_000,
-                if (metered) 36_000 else 60_000,
-                1_500,
-                if (metered) 3_000 else 5_000
-            )
-            .setPrioritizeTimeOverSizeThresholds(true)
-            .build()
         val p = ExoPlayer.Builder(appContext)
-            .setLoadControl(loadControl)
             .setMediaSourceFactory(DefaultMediaSourceFactory(sourceFactory()))
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -145,42 +124,8 @@ object PlayerHolder {
                 _playing.value = p.playWhenReady && state != Player.STATE_ENDED
                 if (state == Player.STATE_ENDED) onEnded()
             }
-            override fun onAudioSessionIdChanged(audioSessionId: Int) {
-                attachEqualizer(audioSessionId)
-            }
         })
         return p
-    }
-
-    private fun attachEqualizer(audioSessionId: Int) {
-        runCatching {
-            equalizer?.release()
-            equalizer = null
-            if (audioSessionId <= 0) return
-            val effect = Equalizer(0, audioSessionId)
-            equalizer = effect
-            val range = effect.bandLevelRange
-            equalizerRange = range[0].toInt()..range[1].toInt()
-            val count = effect.numberOfBands.toInt()
-            _equalizerBands.value = (0 until count).map { effect.getBandLevel(it.toShort()).toInt() }
-            effect.enabled = _equalizerEnabled.value
-        }.onFailure { Graph.diagnostics.record("equalizer", it) }
-    }
-
-    fun setEqualizerEnabled(enabled: Boolean) {
-        _equalizerEnabled.value = enabled
-        runCatching { equalizer?.enabled = enabled }
-            .onFailure { Graph.diagnostics.record("equalizer", it) }
-    }
-
-    fun setEqualizerBand(index: Int, level: Int) {
-        val effect = equalizer ?: return
-        if (index !in _equalizerBands.value.indices) return
-        val safe = level.coerceIn(equalizerRange.first, equalizerRange.last)
-        runCatching {
-            effect.setBandLevel(index.toShort(), safe.toShort())
-            _equalizerBands.value = _equalizerBands.value.toMutableList().also { it[index] = safe }
-        }.onFailure { Graph.diagnostics.record("equalizer", it) }
     }
 
     private fun onEnded() {
