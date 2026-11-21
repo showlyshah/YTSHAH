@@ -211,7 +211,7 @@ fun WatchScreen(
     DisposableEffect(showEqualizer, videoId) {
         if (showEqualizer) {
             val effect = runCatching {
-                android.media.audiofx.Equalizer(0, PlayerHolder.player.audioSessionId).apply { enabled = true }
+                android.media.audiofx.Equalizer(0, PlayerHolder.audioSessionId).apply { enabled = true }
             }.getOrNull()
             equalizer = effect
             eqLevels = effect?.let { eq -> (0 until eq.numberOfBands.toInt()).map { eq.getBandLevel(it.toShort()).toInt() } }.orEmpty()
