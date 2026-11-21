@@ -51,6 +51,9 @@ import com.viewtube.app.data.Paged
 import com.viewtube.app.data.VideoItem
 import com.viewtube.app.data.errorText
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withTimeout
 
 /** Red play-button logo + name, like the YouTube app bar. */
 @Composable
@@ -108,10 +111,24 @@ fun HomeScreen(
             accept = { !it.isShort },
         )
         mixer = nextMixer
-        val trending = runCatching { Graph.repo.trending() }.getOrDefault(emptyList())
-        val fromSubs = if (subIds.isEmpty()) emptyList() else
-            runCatching { Graph.repo.feed(subIds, 3).take(24) }.getOrDefault(emptyList())
-        val discovery = runCatching { nextMixer.more(18) }.getOrDefault(emptyList())
+        // Load independent sources concurrently so one slow endpoint cannot hold
+        // the entire home screen behind a long sequential chain of requests.
+        val (trending, fromSubs, discovery) = coroutineScope {
+            val trendingTask = async {
+                runCatching { withTimeout(15_000) { Graph.repo.trending() } }
+                    .getOrDefault(emptyList())
+            }
+            val subscriptionsTask = async {
+                if (subIds.isEmpty()) emptyList()
+                else runCatching { withTimeout(15_000) { Graph.repo.feed(subIds, 3).take(24) } }
+                    .getOrDefault(emptyList())
+            }
+            val discoveryTask = async {
+                runCatching { withTimeout(20_000) { nextMixer.more(18) } }
+                    .getOrDefault(emptyList())
+            }
+            Triple(trendingTask.await(), subscriptionsTask.await(), discoveryTask.await())
+        }
         val initial = (fromSubs + trending + discovery).distinctBy { it.id }
         videos = if (personalized) LocalRecommendationEngine.rank(initial, Graph.store.history.value, subs) else initial
         hasMore = !nextMixer.exhausted
