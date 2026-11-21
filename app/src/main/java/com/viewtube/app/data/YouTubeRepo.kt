@@ -121,19 +121,25 @@ class YouTubeRepo(private val http: OkHttpClient) {
         }.awaitAll().filterNotNull().map(::shortsSearchPage)
 
         val directItems = queryPages.flatMap { it.items }
-        // Search results are the fast path. Do not wait for channel metadata when the
-        // dedicated Shorts queries already returned a useful first page.
-        if (directItems.size >= 6) return@coroutineScope combineShortsPages(queryPages)
+        // Search results are supplemental; actual channel Shorts tabs remain an independent source.
+        val seededChannelUrls = (seedChannelUrls + directItems.mapNotNull { it.channelUrl })
+            .filter { it.isNotBlank() }.distinct()
 
-        val popularStarted = android.os.SystemClock.elapsedRealtime()
-        val popularResult = runCatching { trending() }
-        popularResult.onSuccess { FeedDiagnostics.record("shorts", "fallback-trending", if (it.isEmpty()) "empty" else "success",
-            android.os.SystemClock.elapsedRealtime() - popularStarted, it.size) }
-            .onFailure { FeedDiagnostics.record("shorts", "fallback-trending", "failure",
-                android.os.SystemClock.elapsedRealtime() - popularStarted, error = it) }
-        val popular = popularResult.getOrDefault(emptyList())
-        val channelUrls = (seedChannelUrls + popular.mapNotNull { it.channelUrl } +
-            directItems.mapNotNull { it.channelUrl })
+        val popular = if (seededChannelUrls.size < 4) {
+            val popularStarted = android.os.SystemClock.elapsedRealtime()
+            val popularResult = runCatching { trending() }
+            popularResult.onSuccess { FeedDiagnostics.record("shorts", "fallback-trending",
+                if (it.isEmpty()) "empty" else "success",
+                android.os.SystemClock.elapsedRealtime() - popularStarted, it.size) }
+                .onFailure { FeedDiagnostics.record("shorts", "fallback-trending", "failure",
+                    android.os.SystemClock.elapsedRealtime() - popularStarted, error = it) }
+            popularResult.getOrDefault(emptyList())
+        } else {
+            FeedDiagnostics.record("shorts", "fallback-trending", "skipped",
+                detail = "Enough subscription/search channels were found")
+            emptyList()
+        }
+        val channelUrls = (seededChannelUrls + popular.mapNotNull { it.channelUrl })
             .filter { it.isNotBlank() }.distinct().take(8)
         FeedDiagnostics.record("shorts", "fallback-channel-discovery", if (channelUrls.isEmpty()) "empty" else "started",
             itemCount = channelUrls.size, detail = "seedChannels=${seedChannelUrls.size}, searchVideos=${directItems.size}")
@@ -153,7 +159,7 @@ class YouTubeRepo(private val http: OkHttpClient) {
             }
         }.awaitAll().filterNotNull()
 
-        val combined = combineShortsPages(queryPages + channelPages)
+        val combined = combineShortsPages(channelPages + queryPages)
         FeedDiagnostics.record("shorts", "combined-discovery", if (combined.items.isEmpty()) "empty" else "success",
             itemCount = combined.items.size, detail = "searchSources=${queryPages.size}, channelSources=${channelPages.size}")
         combined
