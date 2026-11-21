@@ -323,40 +323,18 @@ fun AccountScreen(onBack: () -> Unit) {
 
         Section("Diagnostics & crash reports") {
             Text(
-                "Full runtime trace records app startup, navigation, network request/response codes and timings, extractor results, feed pagination, player states and errors. It is plain text copied to the clipboard; no log file is created and nothing is uploaded.",
+                "Focused Home & Shorts diagnostics only: feed source attempts, endpoint stages, response counts, extraction results, pagination, timings and feed-specific exceptions. Up to 100 recent events are kept locally. Nothing is uploaded.",
                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = {
-                    clipboard.setText(AnnotatedString(RuntimeDiagnostics.report(ctx)))
-                    status = "Complete runtime diagnostic report copied. Paste it here."
-                }) { Text("Copy full diagnostic report") }
-                OutlinedButton(onClick = {
-                    RuntimeDiagnostics.clear(ctx)
-                    status = "Full runtime diagnostic history cleared."
-                }) { Text("Clear full trace") }
-            }
-            Text(
-                "${Graph.diagnostics.read().size} recent redacted diagnostic events stored locally. Fatal crashes are saved automatically on this device.",
-                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { diagnosticExport.launch("viewtube-diagnostics.json") }) { Text("Export diagnostics") }
-                OutlinedButton(onClick = { Graph.diagnostics.clear(); status = "Diagnostic history cleared." }) { Text("Clear logs") }
-            }
-            Text(
-                "Home and Shorts have a separate local recorder. It logs source attempts, response counts, timings, pagination and errors. Nothing is uploaded automatically.",
-                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = {
                     clipboard.setText(AnnotatedString(FeedDiagnostics.report()))
-                    status = "Home & Shorts feed report copied. Paste it here."
-                }) { Text("Copy feed report") }
+                    status = "Home & Shorts-only feed report copied. Paste it here."
+                }) { Text("Copy Home & Shorts report") }
                 OutlinedButton(onClick = {
                     FeedDiagnostics.clear()
                     status = "Home & Shorts feed logs cleared."
-                }) { Text("Clear feed logs") }
+                }) { Text("Clear Home & Shorts logs") }
             }
             Text(
                 if (crashReport != null) "A saved crash report is ready to copy and paste into the bug conversation."
