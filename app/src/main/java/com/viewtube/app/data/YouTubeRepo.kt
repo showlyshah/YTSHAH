@@ -53,7 +53,16 @@ class YouTubeRepo(private val http: OkHttpClient) {
     // ---------------------------------------------------------------- search
 
     suspend fun suggestions(query: String): List<String> = io {
-        runCatching { yt.suggestionExtractor.suggestionList(query) }.getOrDefault(emptyList())
+        val started = android.os.SystemClock.elapsedRealtime()
+        try {
+            val result = yt.suggestionExtractor.suggestionList(query)
+            RuntimeDiagnostics.record("EXTRACTOR", "suggestions-result", if (result.isEmpty()) "empty" else "success",
+                "queryChars=${query.length}, count=${result.size}, durationMs=${android.os.SystemClock.elapsedRealtime() - started}")
+            result
+        } catch (t: Throwable) {
+            RuntimeDiagnostics.record("EXTRACTOR", "suggestions-failed", "failure", "queryChars=${query.length}", t)
+            throw t
+        }
     }
 
     /** [filter] is FILTER_VIDEOS or FILTER_CHANNELS, or null for everything. */
@@ -80,9 +89,20 @@ class YouTubeRepo(private val http: OkHttpClient) {
             items.mapNotNull { it.toItem() },
             next?.let { n ->
                 suspend {
-                    io {
-                        val p = SearchInfo.getMoreItems(yt, handler, n)
-                        searchPaged(handler, p.items, p.nextPage)
+                    val started = android.os.SystemClock.elapsedRealtime()
+                    RuntimeDiagnostics.record("EXTRACTOR", "search-next-page", "started")
+                    try {
+                        val page = io {
+                            val p = SearchInfo.getMoreItems(yt, handler, n)
+                            searchPaged(handler, p.items, p.nextPage)
+                        }
+                        RuntimeDiagnostics.record("EXTRACTOR", "search-next-page", if (page.items.isEmpty()) "empty" else "success",
+                            "durationMs=${android.os.SystemClock.elapsedRealtime() - started}, items=${page.items.size}, continuation=${page.next != null}")
+                        page
+                    } catch (t: Throwable) {
+                        RuntimeDiagnostics.record("EXTRACTOR", "search-next-page", "failure",
+                            "durationMs=${android.os.SystemClock.elapsedRealtime() - started}", t)
+                        throw t
                     }
                 }
             }
@@ -362,9 +382,20 @@ class YouTubeRepo(private val http: OkHttpClient) {
             items.filterIsInstance<StreamInfoItem>().mapNotNull { it.toVideo(ch) },
             next?.let { n ->
                 suspend {
-                    io {
-                        val p = ChannelTabInfo.getMoreItems(yt, tab, n)
-                        tabPaged(tab, ch, p.items, p.nextPage)
+                    val started = android.os.SystemClock.elapsedRealtime()
+                    RuntimeDiagnostics.record("EXTRACTOR", "channel-tab-next-page", "started", "channel=${RuntimeDiagnostics.safeUrl(ch.url)}")
+                    try {
+                        val page = io {
+                            val p = ChannelTabInfo.getMoreItems(yt, tab, n)
+                            tabPaged(tab, ch, p.items, p.nextPage)
+                        }
+                        RuntimeDiagnostics.record("EXTRACTOR", "channel-tab-next-page", if (page.items.isEmpty()) "empty" else "success",
+                            "durationMs=${android.os.SystemClock.elapsedRealtime() - started}, items=${page.items.size}, continuation=${page.next != null}")
+                        page
+                    } catch (t: Throwable) {
+                        RuntimeDiagnostics.record("EXTRACTOR", "channel-tab-next-page", "failure",
+                            "durationMs=${android.os.SystemClock.elapsedRealtime() - started}", t)
+                        throw t
                     }
                 }
             }
