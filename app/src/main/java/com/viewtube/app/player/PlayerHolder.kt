@@ -24,6 +24,9 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.MergingMediaSource
 import com.viewtube.app.data.Graph
+import com.viewtube.app.data.LocationRecommendations
+import com.viewtube.app.data.FILTER_VIDEOS
+import com.viewtube.app.data.VideoItem
 import com.viewtube.app.data.RuntimeDiagnostics
 import com.viewtube.app.data.SponsorBlock
 import com.viewtube.app.data.VideoDetails
@@ -155,7 +158,17 @@ object PlayerHolder {
 
     private fun advanceToNext(d: VideoDetails, onAdvanced: ((String) -> Unit)?, tag: String) {
         val queued = Graph.store.queue.value.firstOrNull { it.id != d.video.id }
-        val recommendation = d.related.firstOrNull { it.id != d.video.id && !Graph.store.isWatched(it.id) }
+        // When the viewer has opted into location, use the area as an additional discovery signal.
+        // YouTube's own related list remains the fallback, and the curated queue always wins.
+        val localRecommendation = LocationRecommendations.area?.let { area ->
+            runCatching {
+                Graph.repo.search("trending videos $area", FILTER_VIDEOS).items
+                    .filterIsInstance<VideoItem>()
+                    .firstOrNull { it.id != d.video.id && !Graph.store.isWatched(it.id) }
+            }.getOrNull()
+        }
+        val recommendation = localRecommendation
+            ?: d.related.firstOrNull { it.id != d.video.id && !Graph.store.isWatched(it.id) }
             ?: d.related.firstOrNull { it.id != d.video.id }
         val nextId = queued?.id ?: recommendation?.id ?: return
         scope.launch {
