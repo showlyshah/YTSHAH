@@ -490,8 +490,9 @@ class YouTubeRepo(private val http: OkHttpClient) {
 
     private fun descText(d: Description?): String {
         if (d == null) return ""
-        return if (d.type == Description.HTML) {
-            HtmlCompat.fromHtml(d.content.orEmpty(), HtmlCompat.FROM_HTML_MODE_LEGACY).toString().trim()
-        } else d.content.orEmpty()
+        val content = d.content()
+        return if (d.type() == Description.Type.HTML) {
+            HtmlCompat.fromHtml(content, HtmlCompat.FROM_HTML_MODE_LEGACY).toString().trim()
+        } else content
     }
 }
