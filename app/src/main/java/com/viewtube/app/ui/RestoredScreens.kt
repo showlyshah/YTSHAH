@@ -15,6 +15,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.Subscriptions
@@ -86,6 +87,7 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
     val shortsPlayer = remember { ShortsPlayerController.get() }
     val loadingSlots by shortsPlayer.loading.collectAsStateCompat()
     val failed by shortsPlayer.failed.collectAsStateCompat()
+    val shortsPlaying by shortsPlayer.playing.collectAsStateCompat()
     var videos by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
     var nextPage by remember { mutableStateOf<(suspend () -> Paged<VideoItem>)?>(null) }
     var loading by remember { mutableStateOf(true) }
@@ -235,6 +237,34 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
                                 maxLines = 3
                             )
                         }
+                    }
+                }
+                Row(
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 142.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = { shortsPlayer.togglePlayPause(pagerState.currentPage) },
+                        modifier = Modifier.background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f), androidx.compose.foundation.shape.CircleShape)
+                    ) {
+                        Icon(
+                            if (shortsPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (shortsPlaying) "Pause Short" else "Play Short",
+                            tint = androidx.compose.ui.graphics.Color.White
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            scope.launch {
+                                val next = pagerState.currentPage + 1
+                                if (next < videos.size) pagerState.animateScrollToPage(next)
+                                else loadMore()
+                            }
+                        },
+                        modifier = Modifier.padding(start = 8.dp)
+                            .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f), androidx.compose.foundation.shape.CircleShape)
+                    ) {
+                        Icon(Icons.Default.SkipNext, contentDescription = "Next Short", tint = androidx.compose.ui.graphics.Color.White)
                     }
                 }
                 if (loadingMore) {
