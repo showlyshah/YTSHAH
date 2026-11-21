@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -118,6 +119,8 @@ fun WatchScreen(
     var loadingComments by remember { mutableStateOf(false) }
     var showDesc by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf(false) }
+    var subtitleSheet by remember { mutableStateOf(false) }
+    var optionsSheet by remember { mutableStateOf(false) }
     var queueSheet by remember { mutableStateOf(false) }
     var aiSheet by remember { mutableStateOf(false) }
     var aiBusy by remember { mutableStateOf(false) }
@@ -130,6 +133,7 @@ fun WatchScreen(
     var showEqualizer by remember { mutableStateOf(false) }
     var equalizer by remember { mutableStateOf<android.media.audiofx.Equalizer?>(null) }
     var eqLevels by remember { mutableStateOf<List<Int>>(emptyList()) }
+    var equalizerActive by remember { mutableStateOf(false) }
     var selectedSubtitleTrack by remember { mutableStateOf<SubtitleTrack?>(null) }
     val translationLanguages = remember { com.google.mlkit.nl.translate.TranslateLanguage.getAllLanguages().sortedBy { java.util.Locale.forLanguageTag(it).getDisplayLanguage(java.util.Locale.getDefault()) } }
     var translationTarget by remember { mutableStateOf(java.util.Locale.getDefault().language.takeIf { it in translationLanguages } ?: "en") }
@@ -208,18 +212,12 @@ fun WatchScreen(
         }
     }
 
-    DisposableEffect(showEqualizer, videoId) {
+    LaunchedEffect(showEqualizer) {
         if (showEqualizer) {
-            val effect = runCatching {
-                android.media.audiofx.Equalizer(0, PlayerHolder.audioSessionId).apply { enabled = true }
-            }.getOrNull()
+            val effect = PlayerHolder.getEqualizer()
             equalizer = effect
+            equalizerActive = effect != null && PlayerHolder.setEqualizerEnabled(true)
             eqLevels = effect?.let { eq -> (0 until eq.numberOfBands.toInt()).map { eq.getBandLevel(it.toShort()).toInt() } }.orEmpty()
-        }
-        onDispose {
-            runCatching { equalizer?.release() }
-            equalizer = null
-            eqLevels = emptyList()
         }
     }
 
@@ -273,26 +271,8 @@ fun WatchScreen(
             if (!immersivePlayer) IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart)) {
                 Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Minimize", tint = Color.White)
             }
-            Row(Modifier.align(Alignment.TopEnd).padding(3.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { sheet = true }, modifier = Modifier.size(38.dp)) { Text("HD", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
-                IconButton(onClick = { sheet = true }, modifier = Modifier.size(38.dp)) { Text("CC", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
-                IconButton(onClick = { showEqualizer = true }, modifier = Modifier.size(38.dp)) { Text("EQ", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
-                IconButton(onClick = { sheet = true }, modifier = Modifier.size(38.dp)) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "Player options", tint = Color.White, modifier = Modifier.size(19.dp))
-                }
-                IconButton(onClick = {
-                    if (immersivePlayer) {
-                        fullscreen = false
-                        ctx.activity()?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                    } else fullscreen = true
-                }, modifier = Modifier.size(38.dp)) {
-                    Icon(if (immersivePlayer) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                        contentDescription = if (immersivePlayer) "Exit fullscreen" else "Fullscreen",
-                        tint = Color.White, modifier = Modifier.size(20.dp))
-                }
-            }
             Box(
-                Modifier.align(Alignment.CenterStart).fillMaxWidth(0.18f).fillMaxSize()
+                Modifier.align(Alignment.CenterStart).fillMaxWidth(0.18f).fillMaxHeight().padding(top = 56.dp, bottom = 56.dp)
                     .pointerInput(videoId) {
                         var accumulated = 0f
                         detectVerticalDragGestures { _, amount ->
@@ -311,7 +291,7 @@ fun WatchScreen(
                     }
             )
             Box(
-                Modifier.align(Alignment.CenterEnd).fillMaxWidth(0.18f).fillMaxSize()
+                Modifier.align(Alignment.CenterEnd).fillMaxWidth(0.18f).fillMaxHeight().padding(top = 56.dp, bottom = 56.dp)
                     .pointerInput(videoId) {
                         var accumulated = 0f
                         detectVerticalDragGestures { _, amount ->
@@ -329,6 +309,30 @@ fun WatchScreen(
                         }
                     }
             )
+            Row(Modifier.align(Alignment.TopEnd).padding(3.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { sheet = true }, modifier = Modifier.size(38.dp)) { Text("HD", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+                IconButton(onClick = { subtitleSheet = true }, modifier = Modifier.size(38.dp)) { Text("CC", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+                IconButton(onClick = { showEqualizer = true }, modifier = Modifier.size(38.dp)) { Text("EQ", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+                IconButton(onClick = { optionsSheet = true }, modifier = Modifier.size(38.dp)) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "Player options", tint = Color.White, modifier = Modifier.size(19.dp))
+                }
+                IconButton(onClick = { PlayerHolder.playNext { nextId -> onVideo(nextId) } }, modifier = Modifier.size(38.dp)) {
+                    Icon(Icons.Default.SkipNext, contentDescription = "Play next recommended video", tint = Color.White, modifier = Modifier.size(21.dp))
+                }
+                IconButton(onClick = {
+                    if (immersivePlayer) {
+                        fullscreen = false
+                        ctx.activity()?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                    } else {
+                        fullscreen = true
+                        ctx.activity()?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    }
+                }, modifier = Modifier.size(38.dp)) {
+                    Icon(if (immersivePlayer) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                        contentDescription = if (immersivePlayer) "Exit fullscreen" else "Fullscreen",
+                        tint = Color.White, modifier = Modifier.size(20.dp))
+                }
+            }
             gestureFeedback?.let {
                 Text(
                     it, color = Color.White, fontSize = 13.sp,
@@ -507,45 +511,6 @@ fun WatchScreen(
                     }
                 }
             }
-            SheetTitle("Subtitles & AI translation")
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Show subtitles", fontWeight = FontWeight.Medium)
-                    Text("Display the selected caption track", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Switch(checked = captionsEnabled, onCheckedChange = { captionsEnabled = it })
-            }
-            if (dd.subtitles.isEmpty()) {
-                Text("No subtitle tracks are available for this video.", modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
-                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else {
-                SheetTitle("Caption language")
-                dd.subtitles.forEach { track ->
-                    SheetRow(track.languageName + if (track.autoGenerated) " · auto" else "",
-                        selectedSubtitleTrack?.url == track.url) {
-                        selectedSubtitleTrack = track
-                    }
-                }
-                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Translate subtitles", fontWeight = FontWeight.Medium)
-                        Text("On-device AI · supported languages", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Switch(checked = translationEnabled, onCheckedChange = { translationEnabled = it })
-                }
-                SheetTitle("Show subtitles in")
-                translationLanguages.forEach { code ->
-                    val label = java.util.Locale.forLanguageTag(code).getDisplayName(java.util.Locale.getDefault())
-                    SheetRow(label.replaceFirstChar { it.uppercase() }, translationTarget == code) { translationTarget = code }
-                }
-            }
-            translationError?.let {
-                Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
-            }
             SheetTitle("Playback mode")
             listOf("off" to "Play one", "one" to "Repeat one", "continuous" to "Play continuously").forEach { (mode, label) ->
                 SheetRow(label, repeatMode == mode) { PlayerHolder.setRepeatMode(mode) }
@@ -571,15 +536,73 @@ fun WatchScreen(
         }
     }
 
+    if (optionsSheet) ModalBottomSheet(onDismissRequest = { optionsSheet = false }) {
+        Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+            SheetTitle("Player options")
+            SheetRow("Video quality and audio tracks", false) { optionsSheet = false; sheet = true }
+            SheetRow("Subtitles and translation", captionsEnabled) { optionsSheet = false; subtitleSheet = true }
+            SheetRow("Audio equalizer", equalizerActive) { optionsSheet = false; showEqualizer = true }
+            SheetRow("Play-next queue (${queue.size})", queue.isNotEmpty()) { optionsSheet = false; queueSheet = true }
+            SheetRow("AI insights", false) { optionsSheet = false; aiSheet = true; aiText = null }
+            SheetRow(if (audioOnly) "Turn video back on" else "Audio only", audioOnly) { PlayerHolder.setAudioOnly(!audioOnly); optionsSheet = false }
+            SheetRow(if (looping) "Turn loop off" else "Loop video", looping) { PlayerHolder.setLooping(!looping); optionsSheet = false }
+        }
+    }
+
+    if (subtitleSheet && dd != null) ModalBottomSheet(onDismissRequest = { subtitleSheet = false }) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
+            SheetTitle("Subtitles & AI translation")
+            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Show subtitles", fontWeight = FontWeight.Medium)
+                    Text("Display the selected caption track", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(checked = captionsEnabled, onCheckedChange = { captionsEnabled = it })
+            }
+            if (dd.subtitles.isEmpty()) {
+                Text("No subtitle tracks are available for this video.", modifier = Modifier.padding(vertical = 8.dp),
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                SheetTitle("Caption language")
+                dd.subtitles.forEach { track ->
+                    SheetRow(track.languageName + if (track.autoGenerated) " · auto" else "", selectedSubtitleTrack?.url == track.url) {
+                        selectedSubtitleTrack = track
+                    }
+                }
+                Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Translate subtitles", fontWeight = FontWeight.Medium)
+                        Text("On-device AI · supported languages", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = translationEnabled, onCheckedChange = { translationEnabled = it })
+                }
+                SheetTitle("Show subtitles in")
+                LazyColumn(Modifier.height(260.dp)) {
+                    items(translationLanguages) { code ->
+                        val label = java.util.Locale.forLanguageTag(code).getDisplayName(java.util.Locale.getDefault())
+                        SheetRow(label.replaceFirstChar { it.uppercase() }, translationTarget == code) { translationTarget = code }
+                    }
+                }
+            }
+            translationError?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp)) }
+        }
+    }
+
     if (showEqualizer) ModalBottomSheet(onDismissRequest = { showEqualizer = false }) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
             Text("Audio equalizer", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-            Text("Uses the Android device audio effect. Availability depends on the device and active audio session.",
+            Text("Live equalizer on the player's audio session. Changes apply while the video keeps playing.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
             val eq = equalizer
             if (eq == null) {
                 Text("The device did not provide an equalizer for this playback session.", color = MaterialTheme.colorScheme.error)
             } else {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Text("Equalizer enabled", modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium)
+                    Switch(checked = equalizerActive, onCheckedChange = { enabled ->
+                        equalizerActive = PlayerHolder.setEqualizerEnabled(enabled)
+                    })
+                }
                 if (eq.numberOfPresets.toInt() > 0) {
                     Text("Presets", fontWeight = FontWeight.Medium)
                     LazyColumn(Modifier.height(150.dp)) {
@@ -587,7 +610,7 @@ fun WatchScreen(
                             val name = runCatching { eq.getPresetName(index.toShort()).toString() }.getOrDefault("Preset $index")
                             SheetRow(name, false) {
                                 runCatching {
-                                    eq.usePreset(index.toShort())
+                                    PlayerHolder.applyEqualizerPreset(index)
                                     eqLevels = (0 until eq.numberOfBands.toInt()).map { eq.getBandLevel(it.toShort()).toInt() }
                                 }
                             }
@@ -600,23 +623,24 @@ fun WatchScreen(
                     val current = eqLevels.getOrNull(index) ?: eq.getBandLevel(index.toShort()).toInt()
                     val frequency = runCatching { eq.getCenterFreq(index.toShort()) / 1000 }.getOrDefault(0)
                     Column(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-                        Text("${frequency} Hz · ${current} dB", fontSize = 12.sp)
+                        Text("${frequency} Hz · ${(current / 100f).toInt()} dB", fontSize = 12.sp)
                         Slider(
-                            value = current.toFloat(),
+                            value = current / 100f,
                             onValueChange = { value ->
-                                val level = value.toInt()
-                                runCatching { eq.setBandLevel(index.toShort(), level.toShort()) }
-                                eqLevels = eqLevels.toMutableList().also { list ->
-                                    while (list.size <= index) list.add(0)
-                                    list[index] = level
+                                val level = (value * 100f).toInt()
+                                if (PlayerHolder.setEqualizerBand(index, level)) {
+                                    eqLevels = eqLevels.toMutableList().also { list ->
+                                        while (list.size <= index) list.add(0)
+                                        list[index] = level
+                                    }
                                 }
                             },
-                            valueRange = range[0].toFloat()..range[1].toFloat()
+                            valueRange = (range[0] / 100f)..(range[1] / 100f)
                         )
                     }
                 }
                 OutlinedButton(onClick = {
-                    runCatching { eq.enabled = false }
+                    equalizerActive = PlayerHolder.setEqualizerEnabled(false)
                     showEqualizer = false
                 }, modifier = Modifier.fillMaxWidth()) { Text("Turn off equalizer") }
             }
