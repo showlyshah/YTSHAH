@@ -25,7 +25,7 @@ class FeedMixer(
             val c = cursors[turn % cursors.size]
             turn++
             val page = try {
-                if (!c.started) repo.search(c.topic, FILTER_VIDEOS)
+                if (!c.started) repo.search(c.topic)
                 else c.next?.invoke() ?: run {
                     cursors.remove(c)
                     null
