@@ -160,7 +160,7 @@ fun HomeScreen(
 
     Column(Modifier.fillMaxSize()) {
         TopBar(onSearch, onAccount)
-        CategoryChips(category) { category = it; scope.launch { list.scrollToItem(0) } }
+        CategoryChips(category, { selected -> category = selected; scope.launch { list.scrollToItem(0) } })
         PullToRefreshBox(isRefreshing = refreshing, onRefresh = { refreshing = true; reload++ }, modifier = Modifier.fillMaxSize()) {
             when {
                 loading -> Loading()
