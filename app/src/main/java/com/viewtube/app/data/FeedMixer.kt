@@ -30,7 +30,8 @@ class FeedMixer(
                     cursors.remove(c)
                     null
                 }
-            } catch (_: Throwable) {
+            } catch (t: Throwable) {
+                if (t is kotlinx.coroutines.CancellationException) throw t
                 // A transient network/HTTP failure must not permanently discard this topic.
                 failures++
                 null
