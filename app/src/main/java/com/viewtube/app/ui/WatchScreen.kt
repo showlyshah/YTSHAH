@@ -231,7 +231,7 @@ fun WatchScreen(
                                     val response = Graph.ai.executeCloud(com.viewtube.app.data.AiRequest(
                                         task = com.viewtube.app.data.AiTask.SUBTITLE_TRANSLATION,
                                         prompt = "Translate this subtitle from ${java.util.Locale.forLanguageTag(track.languageTag).getDisplayName()} to ${java.util.Locale.forLanguageTag(translationTarget).getDisplayName()}. Return only the translated line.",
-                                        videoTitle = dd?.video?.title,
+                                        videoTitle = details?.video?.title,
                                         sourceText = sourceText,
                                         allowCloud = true
                                     ))
