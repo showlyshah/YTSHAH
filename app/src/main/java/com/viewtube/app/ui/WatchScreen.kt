@@ -151,6 +151,8 @@ fun WatchScreen(
         }
     }
     androidx.activity.compose.BackHandler(enabled = fullscreen) { fullscreen = false }
+    // Hardware/system Back should minimise the watch screen into the persistent mini-player.
+    androidx.activity.compose.BackHandler(enabled = !fullscreen) { onBack() }
 
     val playerBox: @Composable (Modifier) -> Unit = { mod ->
         Box(mod.background(Color.Black)) {
