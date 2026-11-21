@@ -1,0 +1,111 @@
+name: Weekly update
+
+# Every Monday: bump NewPipeExtractor to its newest release (that is what fixes most
+# "videos stopped loading" bugs), build a fresh APK, and publish it.
+# The weekly cycle keeps going while the app gets BUG_LIMIT or more bug reports per week.
+# Once a week has fewer than BUG_LIMIT reports, this workflow switches itself off.
+# GRACE_WEEKS stops it from switching off before people have had time to use the app.
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: read
+  actions: write
+
+env:
+  BUG_LIMIT: 5
+  GRACE_WEEKS: 4
+  GH_TOKEN: ${{ github.token }}
+  GH_REPO: ${{ github.repository }}
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Count last week's bug reports
+        id: bugs
+        run: |
+          since=$(date -u -d '7 days ago' +%F)
+          n=$(gh issue list --label bug --state all --search "created:>=$since" --limit 200 --json number --jq length)
+          started=$(git log --diff-filter=A --format=%ct -- .github/workflows/weekly-update.yml | tail -1)
+          age_weeks=$(( ( $(date +%s) - ${started:-$(date +%s)} ) / 604800 ))
+          if [ "$n" -ge "$BUG_LIMIT" ] || [ "$age_weeks" -lt "$GRACE_WEEKS" ]; then
+            echo "keep_going=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "keep_going=false" >> "$GITHUB_OUTPUT"
+          fi
+          {
+            echo "### Weekly update check"
+            echo "- Bug reports in the last 7 days: **$n** (limit to keep going: $BUG_LIMIT)"
+            echo "- Weeks since automation started: **$age_weeks** (grace period: $GRACE_WEEKS)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Switch off weekly updates (fewer than the limit of bug reports)
+        if: steps.bugs.outputs.keep_going == 'false'
+        run: |
+          echo "Fewer than $BUG_LIMIT bug reports this week. Weekly updates are now off." >> "$GITHUB_STEP_SUMMARY"
+          gh workflow disable weekly-update.yml
+
+      - uses: actions/setup-java@v4
+        if: steps.bugs.outputs.keep_going == 'true'
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+        if: steps.bugs.outputs.keep_going == 'true'
+
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.bugs.outputs.keep_going == 'true'
+        with:
+          gradle-version: '8.9'
+
+      - name: Update NewPipeExtractor and bump the version
+        id: bump
+        if: steps.bugs.outputs.keep_going == 'true'
+        run: |
+          latest=$(gh api repos/TeamNewPipe/NewPipeExtractor/releases/latest --jq .tag_name)
+          current=$(grep -oP 'NewPipeExtractor:\Kv[0-9.]+' app/build.gradle.kts)
+          if [ -n "$latest" ] && [ "$latest" != "$current" ]; then
+            sed -i "s/NewPipeExtractor:$current/NewPipeExtractor:$latest/" app/build.gradle.kts
+          fi
+          code=$(grep -oP 'versionCode = \K[0-9]+' app/build.gradle.kts)
+          new=$((code + 1))
+          sed -i "s/versionCode = $code/versionCode = $new/" app/build.gradle.kts
+          sed -i -E "s/versionName = \"[^\"]*\"/versionName = \"1.0.$new\"/" app/build.gradle.kts
+          echo "extractor=$current -> ${latest:-$current}" >> "$GITHUB_OUTPUT"
+          echo "- NewPipeExtractor: $current -> ${latest:-$current}; app version 1.0.$new" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build debug APK
+        if: steps.bugs.outputs.keep_going == 'true'
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      # Only reached when the build above succeeded, so a broken update never lands on main.
+      - name: Commit the update
+        if: steps.bugs.outputs.keep_going == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/build.gradle.kts
+          git commit -m "Weekly update: ${{ steps.bump.outputs.extractor }}"
+          git push
+
+      - name: Publish the new APK
+        if: steps.bugs.outputs.keep_going == 'true'
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk ViewTube-test.apk
+          gh release delete test-build --yes --cleanup-tag || true
+          gh release create test-build ViewTube-test.apk \
+            --prerelease \
+            --target "$(git rev-parse HEAD)" \
+            --title "Test build (latest)" \
+            --notes "Weekly automatic build. Extractor: ${{ steps.bump.outputs.extractor }}."
