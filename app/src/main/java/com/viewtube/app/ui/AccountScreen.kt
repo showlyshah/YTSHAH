@@ -1,6 +1,7 @@
 package com.viewtube.app.ui
 
 import android.content.Intent
+import androidx.compose.animation.animateContentSize
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -490,7 +491,7 @@ fun AccountScreen(onBack: () -> Unit) {
 @Composable
 private fun Section(title: String, content: @Composable () -> Unit) {
     HorizontalDivider(Modifier.padding(top = 8.dp))
-    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(Modifier.animateContentSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(title, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
         content()
     }
