@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.viewtube.app.data.Graph
 import com.viewtube.app.data.FeedDiagnostics
+import com.viewtube.app.data.RuntimeDiagnostics
 import com.viewtube.app.CrashReportRecorder
 import com.viewtube.app.data.SubscriptionImport
 import com.viewtube.app.player.PlayerHolder
@@ -321,6 +322,20 @@ fun AccountScreen(onBack: () -> Unit) {
         }
 
         Section("Diagnostics & crash reports") {
+            Text(
+                "Full runtime trace records app startup, navigation, network request/response codes and timings, extractor results, feed pagination, player states and errors. It is plain text copied to the clipboard; no log file is created and nothing is uploaded.",
+                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = {
+                    clipboard.setText(AnnotatedString(RuntimeDiagnostics.report(ctx)))
+                    status = "Complete runtime diagnostic report copied. Paste it here."
+                }) { Text("Copy full diagnostic report") }
+                OutlinedButton(onClick = {
+                    RuntimeDiagnostics.clear(ctx)
+                    status = "Full runtime diagnostic history cleared."
+                }) { Text("Clear full trace") }
+            }
             Text(
                 "${Graph.diagnostics.read().size} recent redacted diagnostic events stored locally. Fatal crashes are saved automatically on this device.",
                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
