@@ -2,6 +2,7 @@ package com.viewtube.app.data
 
 import android.util.Xml
 import androidx.core.text.HtmlCompat
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -91,7 +92,7 @@ class YouTubeRepo(private val http: OkHttpClient) {
                 val result = runCatching { search(query, FILTER_VIDEOS).items.filterIsInstance<VideoItem>() }
                 result.onSuccess { FeedDiagnostics.record("home", "trending:$query", if (it.isEmpty()) "empty" else "success",
                     android.os.SystemClock.elapsedRealtime() - started, it.size) }
-                    .onFailure { FeedDiagnostics.record("home", "trending:$query", "failure",
+                    .onFailure { if (it is CancellationException) throw it; FeedDiagnostics.record("home", "trending:$query", "failure",
                         android.os.SystemClock.elapsedRealtime() - started, error = it) }
                 result.getOrDefault(emptyList())
             }
@@ -113,6 +114,7 @@ class YouTubeRepo(private val http: OkHttpClient) {
                         android.os.SystemClock.elapsedRealtime() - started, count,
                         detail = "rawItems=${page.items.size}, hasContinuation=${page.next != null}")
                 }.onFailure {
+                    if (it is CancellationException) throw it
                     FeedDiagnostics.record("shorts", "search:$query", "failure",
                         android.os.SystemClock.elapsedRealtime() - started, error = it)
                 }
@@ -131,7 +133,7 @@ class YouTubeRepo(private val http: OkHttpClient) {
             popularResult.onSuccess { FeedDiagnostics.record("shorts", "fallback-trending",
                 if (it.isEmpty()) "empty" else "success",
                 android.os.SystemClock.elapsedRealtime() - popularStarted, it.size) }
-                .onFailure { FeedDiagnostics.record("shorts", "fallback-trending", "failure",
+                .onFailure { if (it is CancellationException) throw it; FeedDiagnostics.record("shorts", "fallback-trending", "failure",
                     android.os.SystemClock.elapsedRealtime() - popularStarted, error = it) }
             popularResult.getOrDefault(emptyList())
         } else {
@@ -152,7 +154,7 @@ class YouTubeRepo(private val http: OkHttpClient) {
                     val result = runCatching { channelShorts(url) }
                     result.onSuccess { FeedDiagnostics.record("shorts", "channel-tab", if (it.items.isEmpty()) "empty" else "success",
                         android.os.SystemClock.elapsedRealtime() - started, it.items.size, detail = "channelUrl=[redacted]") }
-                        .onFailure { FeedDiagnostics.record("shorts", "channel-tab", "failure",
+                        .onFailure { if (it is CancellationException) throw it; FeedDiagnostics.record("shorts", "channel-tab", "failure",
                             android.os.SystemClock.elapsedRealtime() - started, error = it, detail = "channelUrl=[redacted]") }
                     result.getOrNull()
                 }
