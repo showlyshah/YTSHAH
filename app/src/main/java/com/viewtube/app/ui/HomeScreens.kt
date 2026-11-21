@@ -176,9 +176,16 @@ fun HomeScreen(
                 }
             }
 
-            publish(trendingTask.await())
-            publish(subscriptionsTask.await())
-            publish(discoveryTask.await())
+            // Publish each source as soon as it completes; a slow trending request
+            // must not block already-loaded subscriptions or topic results.
+            val completed = kotlinx.coroutines.channels.Channel<List<VideoItem>>(3)
+            launch { completed.send(trendingTask.await()) }
+            launch { completed.send(subscriptionsTask.await()) }
+            launch { completed.send(discoveryTask.await()) }
+            repeat(3) {
+                publish(completed.receive())
+            }
+            completed.close()
 
             if (accumulated.isEmpty()) {
                 val started = android.os.SystemClock.elapsedRealtime()
