@@ -217,7 +217,7 @@ fun WatchScreen(
         if (showEqualizer) {
             val effect = PlayerHolder.getEqualizer()
             equalizer = effect
-            equalizerActive = effect != null && PlayerHolder.setEqualizerEnabled(true)
+            equalizerActive = runCatching { effect?.enabled == true }.getOrDefault(false)
             eqLevels = effect?.let { eq -> (0 until eq.numberOfBands.toInt()).map { eq.getBandLevel(it.toShort()).toInt() } }.orEmpty()
         }
     }
