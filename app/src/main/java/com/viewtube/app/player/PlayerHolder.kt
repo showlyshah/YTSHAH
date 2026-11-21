@@ -61,6 +61,12 @@ object PlayerHolder {
         )
     }
 
+    private val generatedAudioSessionId: Int by lazy {
+        runCatching {
+            (appContext.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager).generateAudioSessionId()
+        }.getOrDefault(C.AUDIO_SESSION_ID_UNSET)
+    }
+    val audioSessionId: Int get() = generatedAudioSessionId
     val player: ExoPlayer by lazy { buildPlayer() }
 
     private val _current = MutableStateFlow<VideoDetails?>(null)
@@ -116,7 +122,10 @@ object PlayerHolder {
             )
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)
-            .build()
+            .build().also { player ->
+                val sessionId = generatedAudioSessionId
+                if (sessionId != C.AUDIO_SESSION_ID_UNSET && sessionId > 0) player.setAudioSessionId(sessionId)
+            }
         p.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) { _playing.value = p.playWhenReady && p.playbackState != Player.STATE_ENDED }
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) { _playing.value = playWhenReady && p.playbackState != Player.STATE_ENDED }
