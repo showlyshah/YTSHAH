@@ -76,7 +76,7 @@ object PlayerHolder {
         val session = audioSessionId
         if (session <= 0) return
         equalizerEffect = runCatching {
-            android.media.audiofx.Equalizer(0, session).apply { enabled = false }
+            android.media.audiofx.Equalizer(0, session).apply { enabled = true }
         }.onFailure { Graph.diagnostics.record("equalizer_init", it) }.getOrNull()
     }
 
