@@ -10,7 +10,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Locale
 
-/** Optional coarse-location context. Only the resolved area name is used in search queries. */
+/**
+ * Optional coarse administrative-area context for recommendations.
+ * Exact coordinates and street/locality names are never added to feed queries.
+ */
 object LocationRecommendations {
     @Volatile var area: String? = null
         private set
@@ -32,8 +35,10 @@ object LocationRecommendations {
             @Suppress("DEPRECATION")
             Geocoder(context, Locale.getDefault()).getFromLocation(location.latitude, location.longitude, 1)
                 ?.firstOrNull()?.let { address ->
-                    listOfNotNull(address.locality, address.subAdminArea, address.adminArea, address.countryName)
-                        .distinct().take(2).joinToString(", ")
+                    // District + state/province + country: deliberately omit locality, street,
+                    // sub-thoroughfare and postal code to avoid over-localising recommendations.
+                    listOfNotNull(address.subAdminArea, address.adminArea, address.countryName)
+                        .map { it.trim() }.filter { it.isNotBlank() }.distinct().joinToString(", ")
                 }
         }.getOrNull()?.takeIf { it.isNotBlank() }
         if (resolved != null) area = resolved
