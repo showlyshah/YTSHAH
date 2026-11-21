@@ -153,6 +153,7 @@ fun WatchScreen(
     val height by PlayerHolder.height.collectAsStateCompat()
     val notice by PlayerHolder.skipNotice.collectAsStateCompat()
     val subs by Graph.store.subs.collectAsStateCompat()
+    val cloudAiEnabled by Graph.store.cloudAiEnabled.collectAsStateCompat()
     val later by Graph.store.later.collectAsStateCompat()
     val queue by Graph.store.queue.collectAsStateCompat()
 
@@ -199,7 +200,7 @@ fun WatchScreen(
                     OnDeviceSubtitleTranslator.create(track.languageTag, translationTarget)
                 }.getOrNull()
             }
-            val allowCloudFallback = cloudTranslationEnabled && Graph.store.cloudAiEnabled.value
+            val allowCloudFallback = cloudTranslationEnabled && cloudAiEnabled
             if (needsTranslation && translator == null && !allowCloudFallback) {
                 translationError = "On-device translation is unavailable for this language. Enable cloud AI in Account & settings and opt in to online fallback here."
             }
@@ -626,7 +627,7 @@ fun WatchScreen(
                         Column(Modifier.weight(1f)) {
                             Text("Allow online AI fallback", fontWeight = FontWeight.Medium)
                             Text(
-                                if (Graph.store.cloudAiEnabled.value) "Only used when on-device translation is unavailable"
+                                if (cloudAiEnabled) "Only used when on-device translation is unavailable"
                                 else "First enable optional cloud AI in Account & settings",
                                 fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -634,7 +635,7 @@ fun WatchScreen(
                         Switch(
                             checked = cloudTranslationEnabled,
                             onCheckedChange = { cloudTranslationEnabled = it },
-                            enabled = Graph.store.cloudAiEnabled.value
+                            enabled = cloudAiEnabled
                         )
                     }
                 }
