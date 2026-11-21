@@ -71,6 +71,8 @@ fun AccountScreen(onBack: () -> Unit) {
     val dataSaver by store.dataSaver.collectAsStateCompat()
     val preferredHeight by store.preferredHeight.collectAsStateCompat()
     val preferredAudioBitrate by store.preferredAudioBitrate.collectAsStateCompat()
+    val shortsHeight by store.shortsHeight.collectAsStateCompat()
+    val shortsAudioBitrate by store.shortsAudioBitrate.collectAsStateCompat()
     val subs by store.subs.collectAsStateCompat()
     val history by store.history.collectAsStateCompat()
     val later by store.later.collectAsStateCompat()
@@ -262,6 +264,32 @@ fun AccountScreen(onBack: () -> Unit) {
             }
         }
 
+        Section("Shorts quality") {
+            Text("These preferences apply only to the vertical Shorts player. If a video does not offer the exact selected resolution or bitrate, ViewTube uses the closest available stream.")
+            Text("Shorts video quality")
+            listOf(-1, 0, 360, 480, 720, 1080, 1440, 2160).chunked(4).forEach { group ->
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    group.forEach { h ->
+                        FilterChip(
+                            selected = shortsHeight == h,
+                            onClick = { store.setShortsHeight(h) },
+                            label = { Text(when (h) { -1 -> "Max"; 0 -> "Auto"; else -> "${h}p" }) }
+                        )
+                    }
+                }
+            }
+            Text("Shorts audio quality")
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(0, 320000, 256000, 192000, 128000).forEach { bitrate ->
+                    FilterChip(
+                        selected = shortsAudioBitrate == bitrate,
+                        onClick = { store.setShortsAudioBitrate(bitrate) },
+                        label = { Text(if (bitrate == 0) "Highest" else "${bitrate / 1000} kbps") }
+                    )
+                }
+            }
+        }
+
         Section("Hybrid AI intelligence") {
             Text(
                 "Local topic analysis and description-based assistance work on-device. A cloud provider is optional. " +
@@ -395,6 +423,26 @@ fun AccountScreen(onBack: () -> Unit) {
                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             OutlinedButton(onClick = { confirmWipe = true }) { Text("Delete all my data from this phone") }
+        }
+
+        Section("About ViewTube") {
+            Text("ViewTube ${com.viewtube.app.BuildConfig.VERSION_NAME}", fontWeight = FontWeight.SemiBold)
+            Text(
+                "Vibe coded by Power Wizard Labz",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text("AI credits: on-device BasicLocalAiEngine; optional OpenAI-compatible model endpoint configured by the user. No third-party AI model is bundled or represented as the sole author.")
+            Text("Open-source credits:")
+            Text("• NewPipe Extractor — YouTube metadata and stream extraction")
+            Text("• YouFlow — reference for the Shorts player preloading architecture (GPL-3.0)")
+            Text("• AndroidX Media3 / ExoPlayer — playback and media session")
+            Text("• Jetpack Compose & Material 3 — app UI")
+            Text("• Coil — image loading and thumbnail caching")
+            Text("• OkHttp — network transport")
+            Text("• SponsorBlock — community segment data")
+            Text("Source code and third-party notices: github.com/showlyshah/YTSHAH")
         }
 
         Section("Help improve ViewTube") {
