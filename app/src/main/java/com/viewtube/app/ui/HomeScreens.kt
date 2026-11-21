@@ -167,6 +167,8 @@ fun HomeScreen(
         }
 
         // Topic discovery runs separately and can enrich the feed after the first paint.
+        // Reserve the mixer while its first batch is being assembled to avoid concurrent cursors.
+        loadingMore = true
         val discoveryJob = scope.launch {
             val result = runCatching { withTimeout(25_000) { nextMixer.more(18) } }
             result.onSuccess {
@@ -178,6 +180,7 @@ fun HomeScreen(
                 FeedDiagnostics.record("home", "topic-discovery", "failure", error = it)
                 RuntimeDiagnostics.record("HOME_UI", "topic-discovery", "failure", error = it)
             }
+            loadingMore = false
         }
 
         // If trending is unavailable, show the screen's retry/empty state immediately;
