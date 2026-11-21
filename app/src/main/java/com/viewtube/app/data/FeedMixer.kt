@@ -24,15 +24,28 @@ class FeedMixer(
         while (out.size < min && cursors.isNotEmpty() && failures < 6) {
             val c = cursors[turn % cursors.size]
             turn++
+            val startedAt = android.os.SystemClock.elapsedRealtime()
             val page = try {
-                if (!c.started) repo.search(c.topic)
+                val loaded = if (!c.started) repo.search(c.topic)
                 else c.next?.invoke() ?: run {
                     cursors.remove(c)
                     null
                 }
+                if (loaded != null) {
+                    FeedDiagnostics.record("home", "topic:${c.topic}", if (loaded.items.isEmpty()) "empty" else "success",
+                        android.os.SystemClock.elapsedRealtime() - startedAt,
+                        loaded.items.filterIsInstance<VideoItem>().size,
+                        detail = "rawItems=${loaded.items.size}, continuation=${loaded.next != null}")
+                } else {
+                    FeedDiagnostics.record("home", "topic:${c.topic}", "exhausted",
+                        android.os.SystemClock.elapsedRealtime() - startedAt)
+                }
+                loaded
             } catch (t: Throwable) {
                 if (t is kotlinx.coroutines.CancellationException) throw t
                 // A transient network/HTTP failure must not permanently discard this topic.
+                FeedDiagnostics.record("home", "topic:${c.topic}", "failure",
+                    android.os.SystemClock.elapsedRealtime() - startedAt, error = t)
                 failures++
                 null
             }
