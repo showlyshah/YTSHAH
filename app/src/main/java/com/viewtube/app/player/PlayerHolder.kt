@@ -2,6 +2,7 @@ package com.viewtube.app.player
 
 import android.content.Context
 import android.content.Intent
+import androidx.core.content.ContextCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -341,12 +342,16 @@ object PlayerHolder {
 
         if (!same) loadSegments(d.video.id)
         startWatching(d)
-        appContext.startService(Intent(appContext, PlaybackService::class.java))
+        ContextCompat.startForegroundService(appContext, Intent(appContext, PlaybackService::class.java))
     }
 
     fun stop() {
         saveProgress()
         watcher?.cancel(); saver?.cancel(); sleepJob?.cancel(); sleepJob = null; _sleepRemainingMs.value = null
+        // Explicitly clear playWhenReady before clearing the playlist. MediaSessionService
+        // observes the same player and must see a stopped session when the mini-player closes.
+        player.playWhenReady = false
+        player.pause()
         player.stop()
         player.clearMediaItems()
         _current.value = null
