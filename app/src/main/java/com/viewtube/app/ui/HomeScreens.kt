@@ -30,6 +30,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.compose.ui.platform.LocalContext
+import com.viewtube.app.data.LocationRecommendations
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -84,13 +91,14 @@ fun TopBar(onSearch: () -> Unit, onAccount: () -> Unit) {
 
 private val CATEGORIES = listOf("All", "Music", "Gaming", "Live", "News", "Podcasts", "Movies", "Sports", "Cooking", "Learning", "Comedy")
 
-private fun topicsFor(category: String): List<String> {
+private fun topicsFor(category: String, area: String? = null): List<String> {
     if (category != "All") return listOf(category, "$category new", "$category popular", "best $category")
     val store = Graph.store
     val personal = (store.subs.value.shuffled().take(5).map { it.name } +
         store.history.value.take(8).map { it.channelName }.distinct().take(4) +
         store.searchHistory.value.take(3)).filter { it.isNotBlank() }
-    return personal + listOf("trending", "music", "gaming", "news today", "technology", "science", "movies trailers", "sports highlights")
+    val local = area?.let { listOf("trending videos $it", "local news $it", "events and culture $it") }.orEmpty()
+    return personal + local + listOf("trending", "music", "gaming", "news today", "technology", "science", "movies trailers", "sports highlights")
 }
 
 @Composable
@@ -121,6 +129,11 @@ fun HomeScreen(
     onChannel: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var localArea by remember { mutableStateOf<String?>(null) }
+    val locationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) scope.launch { localArea = LocationRecommendations.refresh(context) }
+    }
     val list = rememberLazyListState()
     var category by remember { mutableStateOf("All") }
     var videos by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
@@ -131,10 +144,15 @@ fun HomeScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(category, reload) {
+    LaunchedEffect(Unit) {
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (granted) localArea = LocationRecommendations.refresh(context)
+    }
+
+    LaunchedEffect(category, reload, localArea) {
         error = null
         if (!refreshing) { loading = true; videos = emptyList() }
-        val m = FeedMixer(topicsFor(category), Graph.repo) { !it.isShort && it.durationSec != 0L }
+        val m = FeedMixer(topicsFor(category, localArea), Graph.repo) { !it.isShort && it.durationSec != 0L }
         mixer = m
         val subs = Graph.store.subs.value
         val fromSubs = if (category == "All" && subs.isNotEmpty())
@@ -160,6 +178,13 @@ fun HomeScreen(
 
     Column(Modifier.fillMaxSize()) {
         TopBar(onSearch, onAccount)
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = {
+                val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                if (granted) scope.launch { localArea = LocationRecommendations.refresh(context) }
+                else locationPermission.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
+            }) { Text(if (localArea == null) "Use my area for recommendations" else "Nearby: $localArea") }
+        }
         CategoryChips(category, { selected -> category = selected; scope.launch { list.scrollToItem(0) } })
         PullToRefreshBox(isRefreshing = refreshing, onRefresh = { refreshing = true; reload++ }, modifier = Modifier.fillMaxSize()) {
             when {
