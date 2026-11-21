@@ -77,57 +77,77 @@ class YouTubeRepo(private val http: OkHttpClient) {
     // -------------------------------------------------------------- trending
 
     suspend fun trending(): List<VideoItem> = io {
-        // The default kiosk endpoint is unreliable in some regions. Keep it as the
-        // preferred source, but fall back to ordinary search (the same path used by
-        // the working Search screen) when it fails or returns no videos.
-        val kiosk = runCatching {
-            val ex = yt.kioskList.defaultKioskExtractor
-            ex.fetchPage()
-            ex.initialPage.items.filterIsInstance<StreamInfoItem>().mapNotNull { it.toVideo() }
-        }.getOrDefault(emptyList())
-        if (kiosk.isNotEmpty()) kiosk else {
+        // NewPipe's default YouTube kiosk is LIVE (not Trending) in current
+        // extractor releases. Use the ordinary, proven search path for Home discovery.
+        val primary = runCatching {
             val handler = yt.searchQHFactory.fromQuery("popular videos")
-            val info = SearchInfo.getInfo(yt, handler)
-            info.relatedItems.filterIsInstance<StreamInfoItem>().mapNotNull { it.toVideo() }
+            SearchInfo.getInfo(yt, handler).relatedItems
+                .filterIsInstance<StreamInfoItem>().mapNotNull { it.toVideo() }
+        }.getOrDefault(emptyList())
+        if (primary.isNotEmpty()) primary else {
+            val handler = yt.searchQHFactory.fromQuery("trending videos")
+            SearchInfo.getInfo(yt, handler).relatedItems
+                .filterIsInstance<StreamInfoItem>().mapNotNull { it.toVideo() }
         }
     }
 
     /**
-     * Shorts discovery uses YouTube's #shorts query without NewPipe's optional
-     * search-filter endpoint. That filter has failed independently of normal search
-     * on some extractor/region combinations. The hashtag query is the discovery
-     * signal; do not reject results merely because the extractor omitted its Shorts flag.
+     * YouTube's search extractor currently omits Shorts from normal search results.
+     * Discover channels through the working search/feed paths, then read each channel's
+     * dedicated Shorts tab (supported by NewPipe's ChannelTabExtractor).
      */
-    suspend fun shorts(): Paged<VideoItem> = io {
-        val primary = yt.searchQHFactory.fromQuery("#shorts")
-        val first = SearchInfo.getInfo(yt, primary)
-        if (first.relatedItems.filterIsInstance<StreamInfoItem>().isNotEmpty()) {
-            shortsPaged(primary, first.relatedItems, first.nextPage)
-        } else {
-            val fallback = yt.searchQHFactory.fromQuery("shorts")
-            val info = SearchInfo.getInfo(yt, fallback)
-            shortsPaged(fallback, info.relatedItems, info.nextPage)
+    suspend fun shorts(seedChannelUrls: List<String> = emptyList()): Paged<VideoItem> {
+        val popular = runCatching { trending() }.getOrDefault(emptyList())
+        val searchSeeds = runCatching { search("shorts").items.filterIsInstance<VideoItem>() }
+            .getOrDefault(emptyList())
+        val channelUrls = (seedChannelUrls + popular.mapNotNull { it.channelUrl } +
+            searchSeeds.mapNotNull { it.channelUrl })
+            .filter { it.isNotBlank() }.distinct().take(16)
+        if (channelUrls.isEmpty()) return Paged(emptyList(), null)
+
+        val gate = Semaphore(4)
+        val pages = coroutineScope {
+            channelUrls.map { url ->
+                async(Dispatchers.IO) {
+                    gate.withPermit {
+                        runCatching { channelShorts(url) }.getOrNull()
+                    }
+                }
+            }.awaitAll().filterNotNull()
         }
+        return combineShortsPages(pages)
     }
 
-    private fun shortsPaged(
-        handler: SearchQueryHandler,
-        items: List<InfoItem>,
-        next: Page?,
-    ): Paged<VideoItem> = Paged(
-        items.filterIsInstance<StreamInfoItem>()
-            .mapNotNull { it.toVideo() }
-            .filterNot { it.isLive }
-            .map { it.copy(isShort = true) },
-        next?.let { page ->
-            suspend {
-                io {
-                    val more = SearchInfo.getMoreItems(yt, handler, page)
-                    shortsPaged(handler, more.items, more.nextPage)
-                }
+    private suspend fun channelShorts(url: String): Paged<VideoItem> = io {
+        val info = ChannelInfo.getInfo(yt, url)
+        val channelUrl = info.url.orEmpty().ifBlank { url }
+        val channel = ChannelItem(
+            id = info.id.orEmpty(),
+            url = channelUrl,
+            name = info.name.orEmpty(),
+            avatar = info.avatars.pick(96),
+            subscribers = info.subscriberCount,
+        )
+        val shortsTab = info.tabs.firstOrNull { tab ->
+            tab.contentFilters.any { it.equals("shorts", ignoreCase = true) } ||
+                tab.url.contains("/shorts", ignoreCase = true)
+        } ?: return@io Paged(emptyList(), null)
+        val first = ChannelTabInfo.getInfo(yt, shortsTab)
+        tabPaged(shortsTab, channel, first.relatedItems, first.nextPage)
+    }
+
+    private fun combineShortsPages(pages: List<Paged<VideoItem>>): Paged<VideoItem> {
+        val items = pages.flatMap { it.items }.filter { it.isShort || !it.isLive }
+            .distinctBy { it.id }.map { it.copy(isShort = true) }
+        val continuations = pages.mapNotNull { it.next }
+        val next = if (continuations.isEmpty()) null else suspend {
+            val nextPages = coroutineScope {
+                continuations.map { load -> async(Dispatchers.IO) { load() } }.awaitAll()
             }
+            combineShortsPages(nextPages)
         }
-    )
+        return Paged(items, next)
+    }
 
     // ----------------------------------------------------------------- video
 
