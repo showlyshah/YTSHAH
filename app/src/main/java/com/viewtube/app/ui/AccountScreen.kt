@@ -5,6 +5,7 @@ import androidx.compose.animation.animateContentSize
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -86,6 +87,7 @@ fun AccountScreen(onBack: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
     var confirmWipe by remember { mutableStateOf(false) }
+    var showAbout by remember { mutableStateOf(false) }
     var pendingBackup by remember { mutableStateOf<String?>(null) }
     var aiBaseUrl by remember { mutableStateOf(Graph.secure.get(com.viewtube.app.data.OpenAiCompatibleProvider.KEY_BASE_URL) ?: com.viewtube.app.data.OpenAiCompatibleProvider.DEFAULT_BASE_URL) }
     var aiModel by remember { mutableStateOf(Graph.secure.get(com.viewtube.app.data.OpenAiCompatibleProvider.KEY_MODEL) ?: com.viewtube.app.data.OpenAiCompatibleProvider.DEFAULT_MODEL) }
@@ -167,7 +169,7 @@ fun AccountScreen(onBack: () -> Unit) {
         }
     }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 32.dp)) {
+    if (showAbout) { AboutScreen(onBack = { showAbout = false }); return }\n\n    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 32.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
             Text("Account & settings", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
@@ -426,24 +428,17 @@ fun AccountScreen(onBack: () -> Unit) {
             OutlinedButton(onClick = { confirmWipe = true }) { Text("Delete all my data from this phone") }
         }
 
-        Section("About ViewTube") {
-            Text("ViewTube ${com.viewtube.app.BuildConfig.VERSION_NAME}", fontWeight = FontWeight.SemiBold)
-            Text(
-                "Vibe coded by Power Wizard Labz",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Text("AI credits: on-device BasicLocalAiEngine; optional OpenAI-compatible model endpoint configured by the user. No third-party AI model is bundled or represented as the sole author.")
-            Text("Open-source credits:")
-            Text("• NewPipe Extractor — YouTube metadata and stream extraction")
-            Text("• YouFlow — reference for the Shorts player preloading architecture (GPL-3.0)")
-            Text("• AndroidX Media3 / ExoPlayer — playback and media session")
-            Text("• Jetpack Compose & Material 3 — app UI")
-            Text("• Coil — image loading and thumbnail caching")
-            Text("• OkHttp — network transport")
-            Text("• SponsorBlock — community segment data")
-            Text("Source code and third-party notices: github.com/showlyshah/YTSHAH")
+        Section("About") {
+            Row(
+                Modifier.fillMaxWidth().clickable { showAbout = true }.padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("About ViewTube", fontWeight = FontWeight.Medium)
+                    Text("Version, AI and open-source credits", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Open About", modifier = Modifier.size(20.dp))
+            }
         }
 
         Section("Help improve ViewTube") {
@@ -505,5 +500,45 @@ private fun ToggleRow(title: String, subtitle: String?, checked: Boolean, onChan
             if (subtitle != null) Text(subtitle, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+
+@Composable
+private fun AboutScreen(onBack: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 32.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            }
+            Text("About ViewTube", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+        }
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("ViewTube", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text("Version ${com.viewtube.app.BuildConfig.VERSION_NAME}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                "Vibe coded by Power Wizard Labz",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.secondary
+            )
+            HorizontalDivider()
+            Text("AI credits", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+            Text("On-device BasicLocalAiEngine provides local heuristic analysis. An optional OpenAI-compatible model endpoint can be configured by the user. No specific third-party model is bundled with ViewTube; the configured provider and model are user-selected.")
+            HorizontalDivider()
+            Text("Open-source credits", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+            Text("• NewPipe Extractor — YouTube metadata and stream extraction")
+            Text("• YouFlow — reference for the Shorts player preloading architecture (GPL-3.0)")
+            Text("• AndroidX Media3 / ExoPlayer — playback and media session")
+            Text("• Jetpack Compose & Material 3 — app interface")
+            Text("• Coil — image loading and thumbnail caching")
+            Text("• OkHttp — network transport")
+            Text("• SponsorBlock — community segment data")
+            HorizontalDivider()
+            Text("Source code and third-party notices", fontWeight = FontWeight.SemiBold)
+            Text("github.com/showlyshah/YTSHAH")
+        }
     }
 }
