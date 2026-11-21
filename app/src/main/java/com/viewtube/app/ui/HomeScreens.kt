@@ -27,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -45,6 +46,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.viewtube.app.data.ChannelItem
 import com.viewtube.app.data.Graph
+import com.viewtube.app.data.RuntimeDiagnostics
+import com.viewtube.app.data.FILTER_VIDEOS
 import com.viewtube.app.data.FeedDiagnostics
 import com.viewtube.app.data.Item
 import com.viewtube.app.data.LocalRecommendationEngine
@@ -85,6 +88,10 @@ fun HomeScreen(
     onChannel: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    DisposableEffect(Unit) {
+        RuntimeDiagnostics.record("HOME_UI", "screen-enter", "ok")
+        onDispose { RuntimeDiagnostics.record("HOME_UI", "screen-dispose", "ok") }
+    }
     val subs by Graph.store.subs.collectAsStateCompat()
     val personalized by Graph.store.personalizedRecommendations.collectAsStateCompat()
     val subIds = subs.map { it.id }
@@ -100,6 +107,7 @@ fun HomeScreen(
     var mixer by remember { mutableStateOf<com.viewtube.app.data.FeedMixer?>(null) }
 
     LaunchedEffect(reload, subIds, personalized) {
+        RuntimeDiagnostics.record("HOME_UI", "initial-load", "started", "reload=$reload subscriptions=${subIds.size} personalized=$personalized")
         loading = true
         loadingMore = false
         loadMoreFailed = false
@@ -189,17 +197,21 @@ fun HomeScreen(
             }
             FeedDiagnostics.record("home", "initial-feed", if (accumulated.isEmpty()) "empty" else "success",
                 itemCount = accumulated.size, detail = "staged=true, trending=${trendingTask.isCompleted}, subscriptions=${subscriptionsTask.isCompleted}, discovery=${discoveryTask.isCompleted}")
+            RuntimeDiagnostics.record("HOME_UI", "initial-load-results", if (accumulated.isEmpty()) "empty" else "success",
+                "videos=${accumulated.size}, mixerExhausted=${nextMixer.exhausted}")
             hasMore = !nextMixer.exhausted
             if (videos.isEmpty()) error = "The feed sources did not return videos. Check your connection and try again."
         }
         loading = false
         refreshing = false
+        RuntimeDiagnostics.record("HOME_UI", "initial-load-finished", if (videos.isEmpty()) "empty" else "success", "displayedVideos=${videos.size}, hasMore=$hasMore, errorPresent=${error != null}")
     }
 
     fun loadNextPage() {
         if (loading || loadingMore || !hasMore) return
         val activeMixer = mixer ?: return
         scope.launch {
+            RuntimeDiagnostics.record("HOME_UI", "pagination-request", "started", "currentVideos=${videos.size}")
             loadingMore = true
             loadMoreFailed = false
             val started = android.os.SystemClock.elapsedRealtime()
@@ -216,11 +228,14 @@ fun HomeScreen(
                 }
                 hasMore = !activeMixer.exhausted
             }.onFailure {
+                if (it is kotlinx.coroutines.CancellationException) throw it
                 FeedDiagnostics.record("home", "next-page", "failure", android.os.SystemClock.elapsedRealtime() - started, error = it)
+                RuntimeDiagnostics.record("HOME_UI", "pagination-request", "failure", error = it)
                 loadMoreFailed = true
                 error = errorText(it)
             }
             loadingMore = false
+            RuntimeDiagnostics.record("HOME_UI", "pagination-finished", if (loadMoreFailed) "failure" else "complete", "displayedVideos=${videos.size}, hasMore=$hasMore")
         }
     }
 
