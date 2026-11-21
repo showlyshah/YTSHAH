@@ -106,7 +106,7 @@ fun HomeScreen(
         videos = emptyList()
         listState.scrollToItem(0)
         val nextMixer = com.viewtube.app.data.FeedMixer(
-            topics = listOf("popular videos", "music", "technology", "gaming", "science", "news", "education"),
+            topics = listOf("popular", "music", "technology", "gaming", "science", "news", "education"),
             repo = Graph.repo,
             accept = { !it.isShort },
         )
@@ -129,7 +129,13 @@ fun HomeScreen(
             }
             Triple(trendingTask.await(), subscriptionsTask.await(), discoveryTask.await())
         }
-        val initial = (fromSubs + trending + discovery).distinctBy { it.id }
+        var initial = (fromSubs + trending + discovery).distinctBy { it.id }
+        // Last-resort fallback uses the same unfiltered search path as the working Search screen.
+        if (initial.isEmpty()) {
+            initial = runCatching {
+                withTimeout(18_000) { Graph.repo.search("popular").items.filterIsInstance<VideoItem>() }
+            }.getOrDefault(emptyList())
+        }
         videos = if (personalized) LocalRecommendationEngine.rank(initial, Graph.store.history.value, subs) else initial
         hasMore = !nextMixer.exhausted
         if (videos.isEmpty()) error = "The feed sources did not return videos. Check your connection and try again."
