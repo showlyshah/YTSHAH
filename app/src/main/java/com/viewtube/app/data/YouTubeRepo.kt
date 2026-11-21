@@ -27,6 +27,7 @@ import org.schabi.newpipe.extractor.stream.StreamInfo
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import org.schabi.newpipe.extractor.stream.StreamType
 import org.xmlpull.v1.XmlPullParser
+import org.json.JSONObject
 import java.io.StringReader
 import java.time.OffsetDateTime
 
@@ -183,22 +184,72 @@ class YouTubeRepo(private val http: OkHttpClient) {
             while (i < lines.size) {
                 val line = lines[i].trim()
                 if (timing.matches(line)) {
-                    val parts = line.substringBefore(" ").split("-->")
-                    val start = parseCaptionTime(parts[0].trim())
-                    val end = parseCaptionTime(parts[1].trim().substringBefore(" "))
-                    val textLines = mutableListOf<String>()
-                    i++
-                    while (i < lines.size && lines[i].isNotBlank()) {
-                        val candidate = lines[i].trim()
-                        if (!candidate.startsWith("NOTE") && !candidate.matches(Regex("\\d+"))) textLines += candidate
+                    // Do not truncate at the first space: that discards the arrow and end time.
+                    val parts = line.split("-->", limit = 2)
+                    if (parts.size == 2) {
+                        val start = parseCaptionTime(parts[0].trim())
+                        val end = parseCaptionTime(parts[1].trim().substringBefore(" "))
+                        val textLines = mutableListOf<String>()
                         i++
+                        while (i < lines.size && lines[i].isNotBlank()) {
+                            val candidate = lines[i].trim()
+                            if (!candidate.startsWith("NOTE") && !candidate.matches(Regex("\\d+"))) textLines += candidate
+                            i++
+                        }
+                        val cueText = HtmlCompat.fromHtml(
+                            textLines.joinToString(" ").replace(Regex("<[^>]+>"), ""),
+                            HtmlCompat.FROM_HTML_MODE_LEGACY
+                        ).toString().trim()
+                        if (cueText.isNotBlank() && end > start) out += SubtitleCue(start, end, cueText)
                     }
-                    val cueText = textLines.joinToString(" ").replace(Regex("<[^>]+>"), "").trim()
-                    if (cueText.isNotBlank() && end > start) out += SubtitleCue(start, end, cueText)
                 }
                 i++
             }
-            out.take(12000)
+            if (out.isNotEmpty()) return@io out.take(12000)
+
+            // YouTube may return its XML timed-text or JSON3 representation rather than WebVTT.
+            val xmlCues = runCatching {
+                val parser = Xml.newPullParser()
+                parser.setInput(StringReader(raw))
+                val parsed = mutableListOf<SubtitleCue>()
+                var event = parser.eventType
+                while (event != XmlPullParser.END_DOCUMENT) {
+                    if (event == XmlPullParser.START_TAG && parser.name == "text") {
+                        val start = parser.getAttributeValue(null, "start")?.toDoubleOrNull()
+                        val duration = parser.getAttributeValue(null, "dur")?.toDoubleOrNull()
+                        val caption = parser.nextText().trim()
+                        if (start != null && duration != null && duration > 0 && caption.isNotBlank()) {
+                            val clean = HtmlCompat.fromHtml(caption, HtmlCompat.FROM_HTML_MODE_LEGACY).toString().trim()
+                            if (clean.isNotBlank()) parsed += SubtitleCue(
+                                (start * 1000).toLong(), ((start + duration) * 1000).toLong(), clean
+                            )
+                        }
+                    }
+                    event = parser.next()
+                }
+                parsed
+            }.getOrDefault(emptyList())
+            if (xmlCues.isNotEmpty()) return@io xmlCues.take(12000)
+
+            runCatching {
+                val events = JSONObject(raw).optJSONArray("events") ?: return@runCatching emptyList()
+                buildList {
+                    for (index in 0 until events.length()) {
+                        val event = events.optJSONObject(index) ?: continue
+                        val start = event.optLong("tStartMs", -1L)
+                        val duration = event.optLong("dDurationMs", 0L)
+                        val segments = event.optJSONArray("segs") ?: continue
+                        val caption = buildString {
+                            for (part in 0 until segments.length()) {
+                                append(segments.optJSONObject(part)?.optString("utf8").orEmpty())
+                            }
+                        }.trim()
+                        if (start >= 0 && duration > 0 && caption.isNotBlank()) {
+                            add(SubtitleCue(start, start + duration, caption))
+                        }
+                    }
+                }
+            }.getOrDefault(emptyList()).take(12000)
         }
     }
 
