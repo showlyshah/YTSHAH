@@ -325,7 +325,7 @@ object PlayerHolder {
             .setArtist(d.channel.name)
             .setArtworkUri(d.video.thumbnail?.let { android.net.Uri.parse(it) })
             .build()
-        val subtitleConfigurations = if (d.isLive) emptyList() else buildList {
+        val subtitleConfigurations = if (d.isLive || !textTracksEnabled) emptyList() else buildList {
             // Attach only the chosen source track. Loading every available language in parallel
             // wastes requests and lets an unused/expired track interfere with playback.
             val track = d.subtitles.firstOrNull { it.url == selectedSubtitleUrl } ?: return@buildList
