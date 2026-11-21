@@ -1,7 +1,13 @@
 package com.viewtube.app.player
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.Bundle
+import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
@@ -31,6 +37,31 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+
+        // MediaSessionService normally promotes itself when it observes active playback.
+        // PlayerHolder can start playback just before this service is created, however,
+        // which can miss that initial state transition. Android 14+ requires an immediate
+        // foreground notification after startForegroundService(); post a lightweight
+        // placeholder first, then Media3 can replace it with its media controls notification.
+        ensurePlaybackNotificationChannel()
+        val startupNotification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setContentTitle(getString(R.string.app_name))
+            .setContentText("Starting playback")
+            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .build()
+        ServiceCompat.startForeground(
+            this,
+            NOTIFICATION_ID,
+            startupNotification,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            else 0
+        )
+
         session = MediaSession.Builder(this, PlayerHolder.player)
             .setCallback(object : MediaSession.Callback {
                 override fun onConnect(
@@ -63,6 +94,21 @@ class PlaybackService : MediaSessionService() {
             .build()
     }
 
+    private fun ensurePlaybackNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager = getSystemService(NotificationManager::class.java)
+            if (manager.getNotificationChannel(CHANNEL_ID) == null) {
+                manager.createNotificationChannel(
+                    NotificationChannel(
+                        CHANNEL_ID,
+                        "Playback",
+                        NotificationManager.IMPORTANCE_LOW
+                    ).apply { description = "Playback status and controls" }
+                )
+            }
+        }
+    }
+
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
 
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -82,5 +128,9 @@ class PlaybackService : MediaSessionService() {
 
     private companion object {
         const val ACTION_STOP = "viewtube.STOP"
+        const val CHANNEL_ID = "viewtube_playback"
+        // Media3's default media notification ID; reuse it so its media controls replace
+        // this startup notification instead of leaving a second persistent notification.
+        const val NOTIFICATION_ID = 1001
     }
 }
