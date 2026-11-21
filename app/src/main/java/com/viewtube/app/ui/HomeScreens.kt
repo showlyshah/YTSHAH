@@ -93,7 +93,13 @@ fun HomeScreen(
     var reload by remember { mutableIntStateOf(0) }
     val mixer = remember(reload) {
         FeedMixer(
-            listOf("popular", "music", "technology", "gaming", "science", "news", "education"),
+            listOf(
+                "popular", "music", "technology", "gaming", "science", "news", "education",
+                "trending videos", "latest videos", "India trending", "Malayalam songs",
+                "football highlights", "travel vlogs", "cooking", "documentaries",
+                "movie trailers", "podcasts", "live music", "history", "space science",
+                "smartphones", "comedy", "fitness", "automobiles", "wildlife"
+            ),
             Graph.repo,
         ) { true }
     }
@@ -109,7 +115,7 @@ fun HomeScreen(
         val subscriptionResult = runCatching {
             if (subs.isEmpty()) emptyList() else Graph.repo.feed(subs.map { it.id }, 3).take(20)
         }
-        val discovery = mixer.more(12)
+        val discovery = mixer.more(20)
         videos = (subscriptionResult.getOrDefault(emptyList()) +
             trendingResult.getOrDefault(emptyList()) + discovery).distinctBy { it.id }
 
@@ -204,11 +210,13 @@ fun SearchScreen(initialQuery: String, onBack: () -> Unit, onVideo: (VideoItem) 
     var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
     val list = rememberLazyListState()
+    val searchHistory by Graph.store.searchHistory.collectAsStateCompat()
 
     fun run(q: String) {
         if (q.isBlank()) return
         query = q
         submitted = q
+        Graph.store.addSearch(q)
         suggestions = emptyList()
         results = emptyList()
         next = null
@@ -295,6 +303,29 @@ fun SearchScreen(initialQuery: String, onBack: () -> Unit, onVideo: (VideoItem) 
             error != null -> Message("Search failed", error, "Try again") { run(submitted) }
             submitted.isNotBlank() && results.isEmpty() -> Message("No results for \"$submitted\"")
             else -> LazyColumn(Modifier.fillMaxSize(), state = list) {
+                if (submitted.isBlank() && searchHistory.isNotEmpty()) {
+                    item {
+                        Row(
+                            Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Recent searches", modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                            TextButton(onClick = { Graph.store.clearSearches() }) { Text("Clear") }
+                        }
+                    }
+                    items(searchHistory) { term ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable { run(term) }.padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                            Text(term, modifier = Modifier.weight(1f).padding(start = 14.dp))
+                            TextButton(onClick = { Graph.store.removeSearch(term) }) { Text("Remove") }
+                        }
+                    }
+                } else if (submitted.isBlank()) {
+                    item { Text("Search videos, channels and creators", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp)) }
+                }
                 items(results.size) { index ->
                     when (val resultItem = results[index]) {
                         is VideoItem -> VideoRow(resultItem) { onVideo(resultItem) }
