@@ -517,7 +517,7 @@ private fun AboutScreen(onBack: () -> Unit) {
         }
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("ViewTube", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            Text("Version ${com.viewtube.app.BuildConfig.VERSION_NAME}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Version $versionName", color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(
                 "Vibe coded by Power Wizard Labz",
                 fontSize = 20.sp,
