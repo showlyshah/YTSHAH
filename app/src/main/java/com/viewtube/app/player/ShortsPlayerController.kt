@@ -99,7 +99,7 @@ class ShortsPlayerController private constructor() {
         }
         videos.drop(page + 1).take(3).mapNotNull { it.thumbnail }.distinct().forEach { url ->
             Graph.appContext.imageLoader.enqueue(
-                ImageRequest.Builder(Graph.appContext).data(url).size(480).build()
+                ImageRequest.Builder(Graph.appContext).data(url).size(480, 480).build()
             )
         }
     }
