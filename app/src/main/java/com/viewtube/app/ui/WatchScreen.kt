@@ -77,7 +77,6 @@ import com.viewtube.app.data.Graph
 import com.viewtube.app.data.Paged
 import com.viewtube.app.data.VideoDetails
 import com.viewtube.app.data.SubtitleTrack
-import com.viewtube.app.data.OnDeviceSubtitleTranslator
 import com.viewtube.app.data.errorText
 import com.viewtube.app.data.watchUrl
 import com.viewtube.app.player.PlayerHolder
