@@ -218,15 +218,21 @@ fun WatchScreen(
                         if (localText != null) {
                             localText
                         } else if (allowCloudFallback) {
-                            cloudCache[sourceText] ?: run {
-                                val response = Graph.ai.executeCloud(com.viewtube.app.data.AiRequest(
-                                    task = com.viewtube.app.data.AiTask.SUBTITLE_TRANSLATION,
-                                    prompt = "Translate this subtitle from ${java.util.Locale.forLanguageTag(track.languageTag).getDisplayName()} to ${java.util.Locale.forLanguageTag(translationTarget).getDisplayName()}. Return only the translated line.",
-                                    videoTitle = dd?.video?.title,
-                                    sourceText = sourceText,
-                                    allowCloud = true
-                                ))
-                                response.text.trim().also { cloudCache[sourceText] = it }
+                            try {
+                                cloudCache[sourceText] ?: run {
+                                    val response = Graph.ai.executeCloud(com.viewtube.app.data.AiRequest(
+                                        task = com.viewtube.app.data.AiTask.SUBTITLE_TRANSLATION,
+                                        prompt = "Translate this subtitle from ${java.util.Locale.forLanguageTag(track.languageTag).getDisplayName()} to ${java.util.Locale.forLanguageTag(translationTarget).getDisplayName()}. Return only the translated line.",
+                                        videoTitle = dd?.video?.title,
+                                        sourceText = sourceText,
+                                        allowCloud = true
+                                    ))
+                                    response.text.trim().also { cloudCache[sourceText] = it }
+                                }
+                            } catch (error: Throwable) {
+                                if (error is kotlinx.coroutines.CancellationException) throw error
+                                translationError = error.message ?: "Online AI translation failed."
+                                sourceText
                             }
                         } else {
                             sourceText
