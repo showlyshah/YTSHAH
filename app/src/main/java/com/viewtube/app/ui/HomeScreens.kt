@@ -1,5 +1,6 @@
 package com.viewtube.app.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,14 +18,17 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.NorthWest
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -42,6 +46,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.viewtube.app.data.ChannelItem
+import com.viewtube.app.data.FeedMixer
 import com.viewtube.app.data.Graph
 import com.viewtube.app.data.Item
 import com.viewtube.app.data.Paged
@@ -52,7 +57,6 @@ import kotlinx.coroutines.launch
 /** Red play-button logo + name, like the YouTube app bar. */
 @Composable
 fun TopBar(onSearch: () -> Unit, onAccount: () -> Unit) {
-    val name by Graph.store.profileName.collectAsStateCompat()
     Row(
         Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -65,7 +69,36 @@ fun TopBar(onSearch: () -> Unit, onAccount: () -> Unit) {
         IconButton(onClick = onAccount) {
             Avatar(null, 30)
         }
-        if (name.isNotBlank()) Spacer(Modifier.width(0.dp))
+    }
+}
+
+private val CATEGORIES = listOf("All", "Music", "Gaming", "Live", "News", "Podcasts", "Movies", "Sports", "Cooking", "Learning", "Comedy")
+
+private fun topicsFor(category: String): List<String> {
+    if (category != "All") return listOf(category, "$category new", "$category popular", "best $category")
+    val store = Graph.store
+    val personal = (store.subs.value.shuffled().take(5).map { it.name } +
+        store.history.value.take(8).map { it.channelName }.distinct().take(4) +
+        store.searchHistory.value.take(3)).filter { it.isNotBlank() }
+    return personal + listOf("trending", "music", "gaming", "news today", "technology", "science", "movies trailers", "sports highlights")
+}
+
+@Composable
+fun CategoryChips(selected: String, onSelect: (String) -> Unit, items: List<String> = CATEGORIES) {
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+    ) {
+        items(items) { c ->
+            val on = c == selected
+            Text(
+                c, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                color = if (on) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                    .background(if (on) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.surfaceVariant)
+                    .clickable { onSelect(c) }.padding(horizontal = 12.dp, vertical = 7.dp)
+            )
+        }
     }
 }
 
@@ -78,33 +111,53 @@ fun HomeScreen(
     onChannel: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val subs by Graph.store.subs.collectAsStateCompat()
+    val list = rememberLazyListState()
+    var category by remember { mutableStateOf("All") }
     var videos by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
+    var mixer by remember { mutableStateOf<FeedMixer?>(null) }
     var loading by remember { mutableStateOf(true) }
+    var loadingMore by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(reload, subs.size) {
+    LaunchedEffect(category, reload) {
         error = null
-        if (videos.isEmpty()) loading = true
-        runCatching {
-            val trending = Graph.repo.trending()
-            val fromSubs = if (subs.isEmpty()) emptyList() else Graph.repo.feed(subs.map { it.id }, 3).take(20)
-            (fromSubs + trending).distinctBy { it.id }
-        }.onSuccess { videos = it }.onFailure { if (videos.isEmpty()) error = errorText(it) }
-        loading = false
-        refreshing = false
+        if (!refreshing) { loading = true; videos = emptyList() }
+        val m = FeedMixer(topicsFor(category), Graph.repo) { !it.isShort && it.durationSec != 0L }
+        mixer = m
+        val subs = Graph.store.subs.value
+        val fromSubs = if (category == "All" && subs.isNotEmpty())
+            runCatching { Graph.repo.feed(subs.map { it.id }.shuffled().take(25), 2).take(12) }.getOrDefault(emptyList())
+        else emptyList()
+        val first = runCatching { m.more(12) }.getOrDefault(emptyList())
+        val all = (fromSubs + first).distinctBy { it.id }
+        if (all.isEmpty()) error = "No videos came back. Check your connection and try again."
+        videos = all
+        loading = false; refreshing = false
+    }
+
+    LoadMoreEffect(list, !loading && !loadingMore && mixer?.exhausted == false) {
+        val m = mixer ?: return@LoadMoreEffect
+        loadingMore = true
+        scope.launch {
+            val more = runCatching { m.more(10) }.getOrDefault(emptyList())
+            val known = videos.map { it.id }.toSet()
+            videos = videos + more.filter { it.id !in known }
+            loadingMore = false
+        }
     }
 
     Column(Modifier.fillMaxSize()) {
         TopBar(onSearch, onAccount)
+        CategoryChips(category) { category = it; scope.launch { list.scrollToItem(0) } }
         PullToRefreshBox(isRefreshing = refreshing, onRefresh = { refreshing = true; reload++ }, modifier = Modifier.fillMaxSize()) {
             when {
                 loading -> Loading()
                 error != null -> Message("Couldn't load videos", error, "Try again") { reload++ }
-                else -> LazyColumn(Modifier.fillMaxSize()) {
+                else -> LazyColumn(Modifier.fillMaxSize(), state = list) {
                     items(videos, key = { it.id }) { v -> VideoCard(v, { onVideo(v) }, onChannel) }
+                    if (loadingMore) item { Loading(Modifier.fillMaxWidth().height(72.dp)) }
                 }
             }
         }
@@ -114,8 +167,10 @@ fun HomeScreen(
 @Composable
 fun SearchScreen(initialQuery: String, onBack: () -> Unit, onVideo: (VideoItem) -> Unit, onChannel: (String) -> Unit) {
     val scope = rememberCoroutineScope()
+    val history by Graph.store.searchHistory.collectAsStateCompat()
     var query by remember { mutableStateOf(initialQuery) }
     var submitted by remember { mutableStateOf(initialQuery) }
+    var panel by remember { mutableStateOf(initialQuery.isBlank()) }
     var suggestions by remember { mutableStateOf<List<String>>(emptyList()) }
     var results by remember { mutableStateOf<List<Item>>(emptyList()) }
     var next by remember { mutableStateOf<(suspend () -> Paged<Item>)?>(null) }
@@ -125,11 +180,13 @@ fun SearchScreen(initialQuery: String, onBack: () -> Unit, onVideo: (VideoItem) 
     val list = rememberLazyListState()
 
     fun run(q: String) {
-        if (q.isBlank()) return
-        submitted = q; query = q; suggestions = emptyList()
+        val t = q.trim()
+        if (t.isEmpty()) return
+        Graph.store.addSearch(t)
+        submitted = t; query = t; panel = false; suggestions = emptyList()
         scope.launch {
             loading = true; error = null
-            runCatching { Graph.repo.search(q) }
+            runCatching { Graph.repo.search(t) }
                 .onSuccess { results = it.items; next = it.next }
                 .onFailure { error = errorText(it); results = emptyList(); next = null }
             loading = false
@@ -138,7 +195,7 @@ fun SearchScreen(initialQuery: String, onBack: () -> Unit, onVideo: (VideoItem) 
 
     LaunchedEffect(Unit) { if (initialQuery.isNotBlank()) run(initialQuery) }
     LaunchedEffect(query) {
-        if (query == submitted || query.isBlank()) { suggestions = emptyList(); return@LaunchedEffect }
+        if (!panel || query.isBlank()) { suggestions = emptyList(); return@LaunchedEffect }
         kotlinx.coroutines.delay(250)
         suggestions = Graph.repo.suggestions(query).take(8)
     }
@@ -153,13 +210,33 @@ fun SearchScreen(initialQuery: String, onBack: () -> Unit, onVideo: (VideoItem) 
     }
 
     Column(Modifier.fillMaxSize()) {
-        SearchBar(query, onChange = { query = it }, onSubmit = { run(query) }, onBack = onBack)
+        SearchBar(query, onChange = { query = it; panel = true }, onSubmit = { run(query) }, onBack = onBack)
         when {
-            suggestions.isNotEmpty() -> LazyColumn {
-                items(suggestions) { s ->
-                    Row(Modifier.fillMaxWidth().clickable { run(s) }.padding(horizontal = 16.dp, vertical = 14.dp)) {
-                        Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
-                        Text(s, modifier = Modifier.padding(start = 16.dp))
+            panel -> {
+                val q = query.trim()
+                val mine = if (q.isEmpty()) history else history.filter { it.contains(q, ignoreCase = true) }
+                val others = suggestions.filter { s -> mine.none { it.equals(s, ignoreCase = true) } }
+                LazyColumn(Modifier.fillMaxSize()) {
+                    items(mine, key = { "h$it" }) { h ->
+                        Row(Modifier.fillMaxWidth().clickable { run(h) }.padding(start = 16.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.History, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                            Text(h, modifier = Modifier.weight(1f).padding(start = 16.dp), maxLines = 1)
+                            IconButton(onClick = { Graph.store.removeSearch(h) }) { Icon(Icons.Default.Close, contentDescription = "Remove from history", modifier = Modifier.size(18.dp)) }
+                            IconButton(onClick = { query = h }) { Icon(Icons.Default.NorthWest, contentDescription = "Use in search box", modifier = Modifier.size(18.dp)) }
+                        }
+                    }
+                    items(others, key = { "s$it" }) { sug ->
+                        Row(Modifier.fillMaxWidth().clickable { run(sug) }.padding(start = 16.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                            Text(sug, modifier = Modifier.weight(1f).padding(start = 16.dp), maxLines = 1)
+                            IconButton(onClick = { query = sug }) { Icon(Icons.Default.NorthWest, contentDescription = "Use in search box", modifier = Modifier.size(18.dp)) }
+                        }
+                    }
+                    if (q.isEmpty() && history.isNotEmpty()) item {
+                        TextButton(onClick = { Graph.store.clearSearches() }, modifier = Modifier.padding(horizontal = 8.dp)) { Text("Clear all search history") }
+                    }
+                    if (q.isEmpty() && history.isEmpty()) item {
+                        Text("Your searches will show up here.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
                     }
                 }
             }
@@ -197,7 +274,7 @@ fun SubscriptionsScreen(onSearch: () -> Unit, onAccount: () -> Unit, onVideo: (V
         if (subs.isEmpty()) {
             Message(
                 "Nothing here yet",
-                "Subscribe to channels, or import your subscriptions from Google Takeout in Account."
+                "Subscribe to channels, or import your subscriptions from Google Takeout under You > Import subscriptions."
             )
         } else {
             LazyColumn(Modifier.fillMaxSize()) {
