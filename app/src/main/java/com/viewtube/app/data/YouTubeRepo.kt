@@ -84,11 +84,11 @@ class YouTubeRepo(private val http: OkHttpClient) {
      * after YouTube's renderer changes, leaving the home feed empty.
      */
     suspend fun trending(): List<VideoItem> = coroutineScope {
-        // Match the unfiltered query path used by the Search screen; filter to video items locally.
+        // Request video-only renderers from YouTube instead of extracting mixed result types.
         listOf("popular", "trending", "viral videos").map { query ->
             async(Dispatchers.IO) {
                 val started = android.os.SystemClock.elapsedRealtime()
-                val result = runCatching { search(query).items.filterIsInstance<VideoItem>() }
+                val result = runCatching { search(query, FILTER_VIDEOS).items.filterIsInstance<VideoItem>() }
                 result.onSuccess { FeedDiagnostics.record("home", "trending:$query", if (it.isEmpty()) "empty" else "success",
                     android.os.SystemClock.elapsedRealtime() - started, it.size) }
                     .onFailure { FeedDiagnostics.record("home", "trending:$query", "failure",
@@ -106,7 +106,7 @@ class YouTubeRepo(private val http: OkHttpClient) {
         val queryPages = listOf("shorts", "#shorts", "youtube shorts", "viral shorts").map { query ->
             async(Dispatchers.IO) {
                 val started = android.os.SystemClock.elapsedRealtime()
-                val result = runCatching { search(query) }
+                val result = runCatching { search(query, FILTER_VIDEOS) }
                 result.onSuccess { page ->
                     val count = page.items.filterIsInstance<VideoItem>().size
                     FeedDiagnostics.record("shorts", "search:$query", if (count == 0) "empty" else "success",
