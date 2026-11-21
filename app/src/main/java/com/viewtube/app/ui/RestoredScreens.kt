@@ -79,7 +79,7 @@ fun ShortsScreen(onSearch: () -> Unit, onAccount: () -> Unit, onChannel: (String
         FeedMixer(
             listOf("shorts", "popular shorts", "viral shorts", "music shorts", "gaming shorts", "funny shorts", "science shorts", "Malayalam shorts"),
             Graph.repo,
-        ) { it.isShort }
+        ) { it.isShort || it.durationSec in 1L..180L }
     }
 
     LaunchedEffect(reload) {
@@ -88,8 +88,15 @@ fun ShortsScreen(onSearch: () -> Unit, onAccount: () -> Unit, onChannel: (String
         loadingMore = false
         videos = emptyList()
         try {
-            videos = mixer.more(20)
-            canLoadMore = !mixer.exhausted && mixer.lastError == null
+            // Search endpoints can return ordinary watch URLs even for Shorts queries.
+            // Walk several pages before showing an empty state, accepting extractor-tagged
+            // Shorts and short-form candidates (up to three minutes).
+            val collected = mutableListOf<VideoItem>()
+            repeat(5) {
+                if (collected.size < 20 && !mixer.exhausted) collected += mixer.more(20)
+            }
+            videos = collected.distinctBy { it.id }
+            canLoadMore = !mixer.exhausted
             error = mixer.lastError?.message
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -107,7 +114,7 @@ fun ShortsScreen(onSearch: () -> Unit, onAccount: () -> Unit, onChannel: (String
             try {
                 val page = mixer.more(12)
                 if (page.isNotEmpty()) videos = (videos + page).distinctBy { it.id }
-                canLoadMore = !mixer.exhausted && mixer.lastError == null
+                canLoadMore = !mixer.exhausted
                 error = mixer.lastError?.message
             } catch (cancelled: CancellationException) {
                 throw cancelled
