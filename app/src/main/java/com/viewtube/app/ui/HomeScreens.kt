@@ -112,14 +112,20 @@ fun HomeScreen(
             accept = { !it.isShort },
         )
         mixer = nextMixer
-        // Load independent sources concurrently so one slow endpoint cannot hold
-        // the entire home screen behind a long sequential chain of requests.
-        val (trending, fromSubs, discovery) = coroutineScope {
+        // Load sources concurrently, but publish the first usable results immediately.
+        // The old implementation awaited trending + subscriptions + seven topic searches
+        // before rendering anything, so a slow topic source could leave Home looking blank.
+        coroutineScope {
             val trendingTask = async {
                 val started = android.os.SystemClock.elapsedRealtime()
                 val result = runCatching { withTimeout(15_000) { Graph.repo.trending() } }
-                result.onSuccess { FeedDiagnostics.record("home", "trending-search", if (it.isEmpty()) "empty" else "success", android.os.SystemClock.elapsedRealtime() - started, it.size) }
-                    .onFailure { FeedDiagnostics.record("home", "trending-search", "failure", android.os.SystemClock.elapsedRealtime() - started, error = it) }
+                result.onSuccess { FeedDiagnostics.record("home", "trending-search", if (it.isEmpty()) "empty" else "success",
+                    android.os.SystemClock.elapsedRealtime() - started, it.size) }
+                    .onFailure {
+                        if (it is kotlinx.coroutines.CancellationException) throw it
+                        FeedDiagnostics.record("home", "trending-search", "failure",
+                            android.os.SystemClock.elapsedRealtime() - started, error = it)
+                    }
                 result.getOrDefault(emptyList())
             }
             val subscriptionsTask = async {
@@ -129,36 +135,63 @@ fun HomeScreen(
                 } else {
                     val started = android.os.SystemClock.elapsedRealtime()
                     val result = runCatching { withTimeout(15_000) { Graph.repo.feed(subIds, 3).take(24) } }
-                    result.onSuccess { FeedDiagnostics.record("home", "subscriptions-rss", if (it.isEmpty()) "empty" else "success", android.os.SystemClock.elapsedRealtime() - started, it.size, detail = "${subIds.size} channels") }
-                        .onFailure { FeedDiagnostics.record("home", "subscriptions-rss", "failure", android.os.SystemClock.elapsedRealtime() - started, error = it, detail = "${subIds.size} channels") }
+                    result.onSuccess { FeedDiagnostics.record("home", "subscriptions-rss", if (it.isEmpty()) "empty" else "success",
+                        android.os.SystemClock.elapsedRealtime() - started, it.size, detail = "${subIds.size} channels") }
+                        .onFailure {
+                            if (it is kotlinx.coroutines.CancellationException) throw it
+                            FeedDiagnostics.record("home", "subscriptions-rss", "failure",
+                                android.os.SystemClock.elapsedRealtime() - started, error = it, detail = "${subIds.size} channels")
+                        }
                     result.getOrDefault(emptyList())
                 }
             }
             val discoveryTask = async {
                 val started = android.os.SystemClock.elapsedRealtime()
-                val result = runCatching { withTimeout(20_000) { nextMixer.more(18) } }
-                result.onSuccess { FeedDiagnostics.record("home", "topic-discovery", if (it.isEmpty()) "empty" else "success", android.os.SystemClock.elapsedRealtime() - started, it.size) }
-                    .onFailure { FeedDiagnostics.record("home", "topic-discovery", "failure", android.os.SystemClock.elapsedRealtime() - started, error = it) }
+                val result = runCatching { withTimeout(25_000) { nextMixer.more(18) } }
+                result.onSuccess { FeedDiagnostics.record("home", "topic-discovery", if (it.isEmpty()) "empty" else "success",
+                    android.os.SystemClock.elapsedRealtime() - started, it.size) }
+                    .onFailure {
+                        if (it is kotlinx.coroutines.CancellationException) throw it
+                        FeedDiagnostics.record("home", "topic-discovery", "failure",
+                            android.os.SystemClock.elapsedRealtime() - started, error = it)
+                    }
                 result.getOrDefault(emptyList())
             }
-            Triple(trendingTask.await(), subscriptionsTask.await(), discoveryTask.await())
-        }
-        var initial = (fromSubs + trending + discovery).distinctBy { it.id }
-        // Last-resort fallback uses the same unfiltered search path as the working Search screen.
-        if (initial.isEmpty()) {
-            val started = android.os.SystemClock.elapsedRealtime()
-            val fallback = runCatching {
-                withTimeout(18_000) { Graph.repo.search("popular").items.filterIsInstance<VideoItem>() }
+
+            var accumulated = emptyList<VideoItem>()
+            fun publish(items: List<VideoItem>) {
+                accumulated = (accumulated + items).distinctBy { it.id }
+                videos = if (personalized) LocalRecommendationEngine.rank(accumulated, Graph.store.history.value, subs) else accumulated
+                if (videos.isNotEmpty()) {
+                    error = null
+                    loading = false
+                }
             }
-            fallback.onSuccess { FeedDiagnostics.record("home", "popular-search-fallback", if (it.isEmpty()) "empty" else "success", android.os.SystemClock.elapsedRealtime() - started, it.size) }
-                .onFailure { FeedDiagnostics.record("home", "popular-search-fallback", "failure", android.os.SystemClock.elapsedRealtime() - started, error = it) }
-            initial = fallback.getOrDefault(emptyList())
+
+            publish(trendingTask.await())
+            publish(subscriptionsTask.await())
+            publish(discoveryTask.await())
+
+            if (accumulated.isEmpty()) {
+                val started = android.os.SystemClock.elapsedRealtime()
+                val fallback = runCatching {
+                    withTimeout(18_000) { Graph.repo.search("popular", FILTER_VIDEOS).items.filterIsInstance<VideoItem>() }
+                }
+                fallback.onSuccess { FeedDiagnostics.record("home", "popular-search-fallback",
+                    if (it.isEmpty()) "empty" else "success",
+                    android.os.SystemClock.elapsedRealtime() - started, it.size) }
+                    .onFailure {
+                        if (it is kotlinx.coroutines.CancellationException) throw it
+                        FeedDiagnostics.record("home", "popular-search-fallback", "failure",
+                            android.os.SystemClock.elapsedRealtime() - started, error = it)
+                    }
+                publish(fallback.getOrDefault(emptyList()))
+            }
+            FeedDiagnostics.record("home", "initial-feed", if (accumulated.isEmpty()) "empty" else "success",
+                itemCount = accumulated.size, detail = "staged=true, trending=${trendingTask.isCompleted}, subscriptions=${subscriptionsTask.isCompleted}, discovery=${discoveryTask.isCompleted}")
+            hasMore = !nextMixer.exhausted
+            if (videos.isEmpty()) error = "The feed sources did not return videos. Check your connection and try again."
         }
-        FeedDiagnostics.record("home", "initial-feed", if (initial.isEmpty()) "empty" else "success", itemCount = initial.size,
-            detail = "subscriptions=${fromSubs.size}, trending=${trending.size}, discovery=${discovery.size}")
-        videos = if (personalized) LocalRecommendationEngine.rank(initial, Graph.store.history.value, subs) else initial
-        hasMore = !nextMixer.exhausted
-        if (videos.isEmpty()) error = "The feed sources did not return videos. Check your connection and try again."
         loading = false
         refreshing = false
     }
