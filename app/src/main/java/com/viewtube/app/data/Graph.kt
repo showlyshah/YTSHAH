@@ -64,12 +64,18 @@ object Graph {
 
         RuntimeDiagnostics.record("GRAPH", "http-client", "ready", "connectTimeoutMs=20000 readTimeoutMs=30000")
         val locale = Locale.getDefault()
+        // Recommendations are deliberately country-scoped, not GPS-scoped.
+        // No fine or coarse location permission is requested by ViewTube.
+        val contentCountry = locale.country.ifBlank { "US" }
         NewPipe.init(
             DownloaderImpl(http),
             Localization.fromLocale(locale),
-            ContentCountry(locale.country.ifBlank { "US" })
+            ContentCountry(contentCountry)
         )
-        RuntimeDiagnostics.record("GRAPH", "newpipe-extractor", "ready", "locale=$locale")
+        RuntimeDiagnostics.record(
+            "GRAPH", "newpipe-extractor", "ready",
+            "locale=$locale, regionScope=country, contentCountry=$contentCountry"
+        )
 
         store = LocalStore(app)
         RuntimeDiagnostics.record("GRAPH", "local-store", "ready")
