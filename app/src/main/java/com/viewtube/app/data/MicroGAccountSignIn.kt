@@ -1,22 +1,16 @@
 package com.viewtube.app.data
 
 import android.accounts.AccountManager
-import android.accounts.AccountManagerCallback
-import android.app.Activity
 import android.content.Context
-import android.content.ContextWrapper
-import android.content.pm.PackageManager
-import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
+import android.content.Intent
 
 /**
- * Starts Google account creation through Android's account authenticator.
- * When microG Services Core is installed as the com.google authenticator,
- * its own consent and sign-in UI handles the credentials.
+ * Connects a Google device account through Android's public account chooser.
+ * The chooser delegates account selection/addition to the registered system
+ * authenticator (microG when it is installed and registered for com.google).
  *
- * This links the device account only. It does not manufacture YouTube web
- * cookies or claim that NewPipeExtractor playback is authenticated.
+ * This links the device account only. It does not create YouTube web cookies
+ * or claim that NewPipeExtractor playback is authenticated.
  */
 object MicroGAccountSignIn {
     private const val GOOGLE_ACCOUNT_TYPE = "com.google"
@@ -40,11 +34,34 @@ object MicroGAccountSignIn {
                 }
                 else -> false
             }
-        } catch (_: PackageManager.NameNotFoundException) {
-            false
         } catch (_: Exception) {
             false
         }
+    }
+
+    fun createAccountChooserIntent(): Intent =
+        AccountManager.newChooseAccountIntent(
+            null,
+            null,
+            arrayOf(GOOGLE_ACCOUNT_TYPE),
+            "Choose a Google account for ViewTube",
+            null,
+            null,
+            null
+        )
+
+    fun onAccountChosen(context: Context, data: Intent?): Result<String> {
+        val accountName = data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
+        val accountType = data?.getStringExtra(AccountManager.KEY_ACCOUNT_TYPE)
+        if (accountType != GOOGLE_ACCOUNT_TYPE || accountName.isNullOrBlank()) {
+            return Result.failure(IllegalStateException("No Google account was selected. Sign-in may have been cancelled."))
+        }
+
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_ACCOUNT_NAME, accountName)
+            .apply()
+        return Result.success(accountName)
     }
 
     fun linkedAccount(context: Context): String? =
@@ -58,57 +75,5 @@ object MicroGAccountSignIn {
             .edit()
             .remove(KEY_ACCOUNT_NAME)
             .apply()
-    }
-
-    fun connect(context: Context, onComplete: (Result<String>) -> Unit) {
-        val activity = context.findActivity()
-        if (activity == null) {
-            onComplete(Result.failure(IllegalStateException("Couldn't open the Android account sign-in screen.")))
-            return
-        }
-
-        try {
-            AccountManager.get(activity).addAccount(
-                GOOGLE_ACCOUNT_TYPE,
-                null,
-                null,
-                null,
-                activity,
-                AccountManagerCallback<Bundle> { future ->
-                    val result = try {
-                        future.result
-                    } catch (error: Throwable) {
-                        onComplete(Result.failure(error))
-                        return@AccountManagerCallback
-                    }
-
-                    val accountName = result.getString(AccountManager.KEY_ACCOUNT_NAME)
-                    val accountType = result.getString(AccountManager.KEY_ACCOUNT_TYPE)
-                    if (accountType == GOOGLE_ACCOUNT_TYPE && !accountName.isNullOrBlank()) {
-                        activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                            .edit()
-                            .putString(KEY_ACCOUNT_NAME, accountName)
-                            .apply()
-                        onComplete(Result.success(accountName))
-                    } else {
-                        onComplete(Result.failure(
-                            IllegalStateException("microG did not return a Google account. Sign-in may have been cancelled or the account authenticator is unavailable.")
-                        ))
-                    }
-                },
-                Handler(Looper.getMainLooper())
-            )
-        } catch (error: Throwable) {
-            onComplete(Result.failure(error))
-        }
-    }
-
-    private fun Context.findActivity(): Activity? {
-        var current: Context = this
-        while (current is ContextWrapper) {
-            if (current is Activity) return current
-            current = current.baseContext
-        }
-        return current as? Activity
     }
 }
