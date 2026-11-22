@@ -35,8 +35,29 @@ object MicroGAccountSignIn {
         }.getOrNull()
     }
 
-    fun isMorpheMicroGInstalled(context: Context): Boolean =
-        authenticatorPackage(context) == MORPHE_PACKAGE
+    /**
+     * Do not require AccountManager to expose an authenticator entry to detect
+     * the installed app. MicroG RE may be installed and available to GMS clients
+     * even when the authenticator list is empty or temporarily unavailable.
+     */
+    fun isMorpheMicroGInstalled(context: Context): Boolean {
+        val packageInstalled = runCatching {
+            context.packageManager.getPackageInfo(MORPHE_PACKAGE, 0)
+            true
+        }.getOrDefault(false)
+
+        return packageInstalled || authenticatorPackage(context) == MORPHE_PACKAGE
+    }
+
+    fun detectionDetails(context: Context): String {
+        val installed = runCatching {
+            context.packageManager.getPackageInfo(MORPHE_PACKAGE, 0)
+            true
+        }.getOrDefault(false)
+        val authenticator = authenticatorPackage(context) ?: "not reported"
+        return "Morphe package: " + (if (installed) "installed" else "not found") +
+            "; Google authenticator: " + authenticator
+    }
 
     fun createAccountChooserIntent(): Intent =
         AccountManager.newChooseAccountIntent(
