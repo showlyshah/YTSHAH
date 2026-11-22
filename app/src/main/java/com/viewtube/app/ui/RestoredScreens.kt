@@ -2,6 +2,8 @@ package com.viewtube.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -35,6 +37,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.consume
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -86,11 +92,53 @@ fun MiniPlayer(onOpen: (String) -> Unit) {
     }
 }
 
+@Composable
+fun AppMiniPlayer(onOpenVideo: (String) -> Unit, onOpenShorts: () -> Unit) {
+    val shortsPlayer = remember { ShortsPlayerController.get() }
+    val shortsMinimized by shortsPlayer.minimized.collectAsStateCompat()
+    if (shortsMinimized) {
+        ShortsMiniPlayer(onOpenShorts)
+    } else {
+        MiniPlayer(onOpenVideo)
+    }
+}
+
+@Composable
+private fun ShortsMiniPlayer(onOpen: () -> Unit) {
+    val shortsPlayer = remember { ShortsPlayerController.get() }
+    val video by shortsPlayer.currentVideo.collectAsStateCompat()
+    val playing by shortsPlayer.playing.collectAsStateCompat()
+    if (video == null || !shortsPlayer.minimized.collectAsStateCompat().value) return
+    val current = video ?: return
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        coil.compose.AsyncImage(
+            model = current.thumbnail,
+            contentDescription = null,
+            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            modifier = Modifier.size(width = 58.dp, height = 42.dp)
+        )
+        Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
+            Text(current.title, maxLines = 1, fontWeight = FontWeight.Medium)
+            Text(current.channelName.ifBlank { "Shorts" }, maxLines = 1, fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        IconButton(onClick = { shortsPlayer.toggleCurrentPlayback() }, modifier = Modifier.size(36.dp)) {
+            Text(if (playing) "Ⅱ" else "▶", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        }
+        IconButton(onClick = { shortsPlayer.stop() }, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Default.Close, contentDescription = "Close Shorts mini-player", modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
 @OptIn(UnstableApi::class)
 @Suppress("UNUSED_PARAMETER")
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
-fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
+fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit, onMinimize: () -> Unit) {
     val scope = rememberCoroutineScope()
     val shortsPlayer = remember { ShortsPlayerController.get() }
     val loadingSlots by shortsPlayer.loading.collectAsStateCompat()
@@ -180,10 +228,34 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
     DisposableEffect(shortsPlayer) {
         // A Short has its own isolated player; pause the regular player while the Shorts feed is open.
         PlayerHolder.player.playWhenReady = false
-        onDispose { shortsPlayer.stop() }
+        onDispose {
+            // Keep the isolated Shorts players alive only when the user explicitly minimized them.
+            if (!shortsPlayer.minimized.value) shortsPlayer.stop()
+        }
     }
 
-    Column(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black)) {
+    Column(
+        Modifier.fillMaxSize()
+            .background(androidx.compose.ui.graphics.Color.Black)
+            .pointerInput(onMinimize) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    var downwardDistance = 0f
+                    var minimizedThisGesture = false
+                    while (!minimizedThisGesture) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!change.pressed) break
+                        downwardDistance += change.positionChange().y.coerceAtLeast(0f)
+                        if (downwardDistance >= 112.dp.toPx()) {
+                            change.consume()
+                            minimizedThisGesture = true
+                            onMinimize()
+                        }
+                    }
+                }
+            }
+    ) {
         when {
             loading && videos.isEmpty() -> Loading()
             videos.isEmpty() -> Message(
