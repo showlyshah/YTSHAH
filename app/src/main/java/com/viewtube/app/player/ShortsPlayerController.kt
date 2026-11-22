@@ -44,6 +44,10 @@ class ShortsPlayerController private constructor() {
     val failed: StateFlow<Set<String>> = _failed.asStateFlow()
     private val _playing = MutableStateFlow(false)
     val playing: StateFlow<Boolean> = _playing.asStateFlow()
+    private val _currentVideo = MutableStateFlow<VideoItem?>(null)
+    val currentVideo: StateFlow<VideoItem?> = _currentVideo.asStateFlow()
+    private val _minimized = MutableStateFlow(false)
+    val minimized: StateFlow<Boolean> = _minimized.asStateFlow()
 
     init {
         slots.forEachIndexed { index, slot ->
@@ -81,6 +85,8 @@ class ShortsPlayerController private constructor() {
         }
         val activeSlot = slotOf(page)
         focusedSlot = activeSlot
+        _currentVideo.value = videos[page]
+        _minimized.value = false
         slots.forEachIndexed { index, slot ->
             slot.player.playWhenReady = index == activeSlot && slot.videoId == videos[page].id
         }
@@ -145,7 +151,23 @@ class ShortsPlayerController private constructor() {
         _playing.value = player.playWhenReady
     }
 
+    fun minimize() {
+        if (_currentVideo.value != null && focusedSlot >= 0) _minimized.value = true
+    }
+
+    fun restore() {
+        _minimized.value = false
+    }
+
+    fun toggleCurrentPlayback() {
+        val player = slots.getOrNull(focusedSlot)?.player ?: return
+        if (player.playWhenReady) player.pause() else player.play()
+        _playing.value = player.playWhenReady
+    }
+
     fun stop() {
+        _minimized.value = false
+        _currentVideo.value = null
         slots.forEach { slot ->
             slot.job?.cancel()
             slot.job = null
