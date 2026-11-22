@@ -56,10 +56,20 @@ class PlaybackService : MediaSessionService() {
             .setSessionCommand(nextCommand).build()
     }
     @Suppress("DEPRECATION")
-    private val playPauseButton: CommandButton by lazy {
-        CommandButton.Builder().setDisplayName("Play or pause")
-            .setIconResId(android.R.drawable.ic_media_play)
+    private fun playPauseButton(): CommandButton =
+        CommandButton.Builder().setDisplayName(if (PlayerHolder.player.playWhenReady) "Pause" else "Play")
+            .setIconResId(if (PlayerHolder.player.playWhenReady) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play)
             .setPlayerCommand(Player.COMMAND_PLAY_PAUSE).build()
+
+    private fun updateNotificationLayout() {
+        session?.let { mediaSession ->
+            mediaSession.setCustomLayout(ImmutableList.of(previousButton, playPauseButton(), nextButton, stopButton))
+        }
+    }
+
+    private val notificationPlayerListener = object : Player.Listener {
+        override fun onIsPlayingChanged(isPlaying: Boolean) = updateNotificationLayout()
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) = updateNotificationLayout()
     }
 
     @Suppress("DEPRECATION")
@@ -88,7 +98,14 @@ class PlaybackService : MediaSessionService() {
                         .buildUpon().add(stopCommand).add(previousCommand).add(nextCommand).build()
                     return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                         .setAvailableSessionCommands(commands)
-                        .setCustomLayout(ImmutableList.of(previousButton, playPauseButton, nextButton, stopButton))
+                        .setAvailablePlayerCommands(
+                            MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
+                                .add(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
+                                .add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                                .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                                .build()
+                        )
+                        .setCustomLayout(ImmutableList.of(previousButton, playPauseButton(), nextButton, stopButton))
                         .build()
                 }
 
@@ -110,8 +127,9 @@ class PlaybackService : MediaSessionService() {
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
             })
-            .setCustomLayout(ImmutableList.of(previousButton, playPauseButton, nextButton, stopButton))
+            .setCustomLayout(ImmutableList.of(previousButton, playPauseButton(), nextButton, stopButton))
             .build()
+        PlayerHolder.player.addListener(notificationPlayerListener)
     }
 
     /**
@@ -128,6 +146,7 @@ class PlaybackService : MediaSessionService() {
             .setContentText("Starting playback")
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setContentIntent(activityPendingIntent())
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .build()
@@ -175,6 +194,7 @@ class PlaybackService : MediaSessionService() {
     override fun onDestroy() {
         RuntimeDiagnostics.record("PLAYBACK_SERVICE", "onDestroy", "started")
         stopForeground(STOP_FOREGROUND_REMOVE)
+        PlayerHolder.player.removeListener(notificationPlayerListener)
         session?.release()
         session = null
         super.onDestroy()
