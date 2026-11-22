@@ -1,43 +1,42 @@
 package com.viewtube.app.data
 
+import android.accounts.Account
 import android.accounts.AccountManager
 import android.content.Context
 import android.content.Intent
+import android.app.Activity
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 /**
- * Connects a Google device account through Android's public account chooser.
- * The chooser delegates account selection/addition to the registered system
- * authenticator (microG when it is installed and registered for com.google).
+ * Morphe MicroG RE integration.
  *
- * This links the device account only. It does not create YouTube web cookies
- * or claim that NewPipeExtractor playback is authenticated.
+ * The Android account chooser only selects/adds a device account. A real
+ * authorization step must then request an OAuth token from the installed
+ * account authenticator. ViewTube deliberately does not persist or log the
+ * returned token. NewPipe's cookie-based extractor session is separate.
  */
 object MicroGAccountSignIn {
-    private const val GOOGLE_ACCOUNT_TYPE = "com.google"
-    private const val GOOGLE_SERVICES_PACKAGE = "com.google.android.gms"
+    const val GOOGLE_ACCOUNT_TYPE = "com.google"
+    const val MORPHE_PACKAGE = "app.revanced.android.gms"
+    const val YOUTUBE_READ_ONLY_SCOPE = "https://www.googleapis.com/auth/youtube.readonly"
+    private const val YOUTUBE_TOKEN_TYPE = "oauth2:$YOUTUBE_READ_ONLY_SCOPE"
     private const val PREFS = "viewtube_microg_account"
     private const val KEY_ACCOUNT_NAME = "linked_account"
 
-    fun isMicroGInstalled(context: Context): Boolean {
-        return try {
-            val authenticator = AccountManager.get(context).authenticatorTypes
+    fun authenticatorPackage(context: Context): String? {
+        return runCatching {
+            AccountManager.get(context).authenticatorTypes
                 .firstOrNull { it.type == GOOGLE_ACCOUNT_TYPE }
-                ?: return false
-
-            when (authenticator.packageName) {
-                "com.mgoogle.android.gms", "app.revanced.android.gms" -> true
-                GOOGLE_SERVICES_PACKAGE -> {
-                    val info = context.packageManager.getApplicationInfo(authenticator.packageName, 0)
-                    context.packageManager.getApplicationLabel(info)
-                        .toString()
-                        .contains("microg", ignoreCase = true)
-                }
-                else -> false
-            }
-        } catch (_: Exception) {
-            false
-        }
+                ?.packageName
+        }.getOrNull()
     }
+
+    fun isMorpheMicroGInstalled(context: Context): Boolean =
+        authenticatorPackage(context) == MORPHE_PACKAGE
 
     fun createAccountChooserIntent(): Intent =
         AccountManager.newChooseAccountIntent(
@@ -50,18 +49,59 @@ object MicroGAccountSignIn {
             null
         )
 
-    fun onAccountChosen(context: Context, data: Intent?): Result<String> {
+    fun selectedAccountName(data: Intent?): Result<String> {
         val accountName = data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
         val accountType = data?.getStringExtra(AccountManager.KEY_ACCOUNT_TYPE)
         if (accountType != GOOGLE_ACCOUNT_TYPE || accountName.isNullOrBlank()) {
-            return Result.failure(IllegalStateException("No Google account was selected. Sign-in may have been cancelled."))
+            return Result.failure(
+                IllegalStateException("Morphe MicroG RE did not return a selected Google account.")
+            )
         }
+        return Result.success(accountName)
+    }
 
+    /**
+     * Requests a YouTube Data API read-only OAuth token through Android's
+     * AccountManager. Morphe MicroG RE handles consent and token retrieval.
+     * The raw token is checked for success and immediately discarded.
+     */
+    suspend fun authorizeYoutubeReadOnly(
+        activity: Activity,
+        accountName: String
+    ): Result<Unit> = suspendCancellableCoroutine { continuation ->
+        val account = Account(accountName, GOOGLE_ACCOUNT_TYPE)
+        try {
+            AccountManager.get(activity).getAuthToken(
+                account,
+                YOUTUBE_TOKEN_TYPE,
+                Bundle(),
+                activity,
+                { future ->
+                    val result = runCatching {
+                        val bundle = future.result
+                        val token = bundle.getString(AccountManager.KEY_AUTHTOKEN)
+                        if (token.isNullOrBlank()) {
+                            val message = bundle.getString(AccountManager.KEY_ERROR_MESSAGE)
+                                ?: "Morphe MicroG RE did not return an OAuth token."
+                            throw IllegalStateException(message)
+                        }
+                        // Do not persist, log, or expose the OAuth token.
+                        Unit
+                    }
+                    if (continuation.isActive) continuation.resume(result)
+                },
+                Handler(Looper.getMainLooper())
+            )
+        } catch (error: Exception) {
+            if (continuation.isActive) continuation.resume(Result.failure(error))
+        }
+    }
+
+    fun saveLinkedAccount(context: Context, accountName: String) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_ACCOUNT_NAME, accountName)
             .apply()
-        return Result.success(accountName)
     }
 
     fun linkedAccount(context: Context): String? =
@@ -69,8 +109,8 @@ object MicroGAccountSignIn {
             .getString(KEY_ACCOUNT_NAME, null)
 
     fun disconnect(context: Context) {
-        // This only disconnects ViewTube's local association. It never removes
-        // the Google account from Android or from microG.
+        // This removes only ViewTube's local link. It does not remove the
+        // Android account or revoke grants held by Morphe MicroG RE.
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
             .remove(KEY_ACCOUNT_NAME)
