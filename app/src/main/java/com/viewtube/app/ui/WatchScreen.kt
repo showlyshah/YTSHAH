@@ -221,9 +221,25 @@ fun WatchScreen(
                         player = PlayerHolder.player
                         resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                         setShowSubtitleButton(true)
+                        setShowNextButton(true)
+                        setShowPreviousButton(true)
+                        findViewById<android.view.View>(androidx.media3.ui.R.id.exo_next)?.apply {
+                            isEnabled = true
+                            alpha = 1f
+                            setOnClickListener { PlayerHolder.playNext { nextId -> onVideo(nextId) } }
+                        }
                     }
                 },
-                update = { it.player = PlayerHolder.player },
+                update = { view ->
+                    view.player = PlayerHolder.player
+                    view.setShowNextButton(true)
+                    view.setShowPreviousButton(true)
+                    view.findViewById<android.view.View>(androidx.media3.ui.R.id.exo_next)?.apply {
+                        isEnabled = true
+                        alpha = 1f
+                        setOnClickListener { PlayerHolder.playNext { nextId -> onVideo(nextId) } }
+                    }
+                },
                 modifier = Modifier.fillMaxSize()
             )
             if (!immersivePlayer) IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart)) {
@@ -272,9 +288,6 @@ fun WatchScreen(
                 IconButton(onClick = { runCatching { openDeviceAudioEffects(ctx) }.onFailure { error = "No compatible system audio-effects panel is available on this device." } }, modifier = Modifier.size(38.dp)) { Text("EQ", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
                 IconButton(onClick = { optionsSheet = true }, modifier = Modifier.size(38.dp)) {
                     Icon(Icons.Default.MoreVert, contentDescription = "Player options", tint = Color.White, modifier = Modifier.size(19.dp))
-                }
-                IconButton(onClick = { PlayerHolder.playNext { nextId -> onVideo(nextId) } }, modifier = Modifier.size(38.dp)) {
-                    Icon(Icons.Default.SkipNext, contentDescription = "Play next recommended video", tint = Color.White, modifier = Modifier.size(21.dp))
                 }
                 IconButton(onClick = {
                     if (immersivePlayer) {
