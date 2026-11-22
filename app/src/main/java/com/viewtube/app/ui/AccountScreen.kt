@@ -109,6 +109,7 @@ fun AccountScreen(onBack: () -> Unit) {
                 .onSuccess { accountName ->
                     val activity = ctx as? Activity
                     if (activity == null) {
+                        microGBusy = false
                         status = "Unable to start Morphe MicroG RE authorization from this screen."
                     } else {
                         scope.launch {
