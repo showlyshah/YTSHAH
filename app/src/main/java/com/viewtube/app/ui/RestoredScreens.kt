@@ -92,6 +92,7 @@ fun MiniPlayer(onOpen: (String) -> Unit) {
     }
 }
 
+@OptIn(UnstableApi::class)
 @Composable
 fun AppMiniPlayer(onOpenVideo: (String) -> Unit, onOpenShorts: () -> Unit) {
     val shortsPlayer = remember { ShortsPlayerController.get() }
@@ -103,12 +104,14 @@ fun AppMiniPlayer(onOpenVideo: (String) -> Unit, onOpenShorts: () -> Unit) {
     }
 }
 
+@OptIn(UnstableApi::class)
 @Composable
 private fun ShortsMiniPlayer(onOpen: () -> Unit) {
     val shortsPlayer = remember { ShortsPlayerController.get() }
     val video by shortsPlayer.currentVideo.collectAsStateCompat()
     val playing by shortsPlayer.playing.collectAsStateCompat()
-    if (video == null || !shortsPlayer.minimized.collectAsStateCompat().value) return
+    val minimized by shortsPlayer.minimized.collectAsStateCompat()
+    if (video == null || !minimized) return
     val current = video ?: return
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(horizontal = 12.dp, vertical = 7.dp),
