@@ -219,7 +219,10 @@ fun SearchScreen(initialQuery: String, onBack: () -> Unit, onVideo: (VideoItem) 
     var submitted by remember { mutableStateOf(initialQuery) }
     var suggestions by remember { mutableStateOf<List<String>>(emptyList()) }
     var videoSuggestions by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
+    var suggestionNext by remember { mutableStateOf<(suspend () -> Paged<Item>)?>(null) }
+    var suggestionLoadingMore by remember { mutableStateOf(false) }
     var suggestionLoading by remember { mutableStateOf(false) }
+    val suggestionList = rememberLazyListState()
     var results by remember { mutableStateOf<List<Item>>(emptyList()) }
     var next by remember { mutableStateOf<(suspend () -> Paged<Item>)?>(null) }
     var loading by remember { mutableStateOf(false) }
@@ -229,7 +232,7 @@ fun SearchScreen(initialQuery: String, onBack: () -> Unit, onVideo: (VideoItem) 
 
     fun run(q: String) {
         if (q.isBlank()) return
-        submitted = q; query = q; suggestions = emptyList(); videoSuggestions = emptyList()
+        submitted = q; query = q; suggestions = emptyList(); videoSuggestions = emptyList(); suggestionNext = null
         scope.launch {
             loading = true; error = null
             runCatching { Graph.repo.search(q) }
@@ -244,6 +247,8 @@ fun SearchScreen(initialQuery: String, onBack: () -> Unit, onVideo: (VideoItem) 
         if (query == submitted || query.isBlank()) {
             suggestions = emptyList()
             videoSuggestions = emptyList()
+            suggestionNext = null
+            suggestionLoadingMore = false
             suggestionLoading = false
             return@LaunchedEffect
         }
@@ -251,14 +256,30 @@ fun SearchScreen(initialQuery: String, onBack: () -> Unit, onVideo: (VideoItem) 
         suggestionLoading = true
         runCatching { Graph.repo.search(query) }
             .onSuccess { page ->
-                videoSuggestions = page.items.filterIsInstance<VideoItem>().distinctBy { it.id }.take(8)
+                videoSuggestions = page.items.filterIsInstance<VideoItem>().distinctBy { it.id }
+                suggestionNext = page.next
                 suggestions = if (videoSuggestions.isEmpty()) Graph.repo.suggestions(query).take(8) else emptyList()
             }
             .onFailure {
                 videoSuggestions = emptyList()
+                suggestionNext = null
                 suggestions = runCatching { Graph.repo.suggestions(query).take(8) }.getOrDefault(emptyList())
             }
         suggestionLoading = false
+    }
+
+    LoadMoreEffect(suggestionList, suggestionNext != null && !suggestionLoadingMore && videoSuggestions.isNotEmpty()) {
+        val n = suggestionNext ?: return@LoadMoreEffect
+        suggestionLoadingMore = true
+        scope.launch {
+            runCatching { n() }.onSuccess { page ->
+                val existing = videoSuggestions.mapTo(HashSet()) { it.id }
+                val additions = page.items.filterIsInstance<VideoItem>().filter { existing.add(it.id) }
+                videoSuggestions = videoSuggestions + additions
+                suggestionNext = page.next
+            }.onFailure { suggestionNext = null }
+            suggestionLoadingMore = false
+        }
     }
 
     LoadMoreEffect(list, next != null && !loadingMore) {
@@ -273,8 +294,12 @@ fun SearchScreen(initialQuery: String, onBack: () -> Unit, onVideo: (VideoItem) 
     Column(Modifier.fillMaxSize()) {
         SearchBar(query, onChange = { query = it }, onSubmit = { run(query) }, onBack = onBack)
         when {
-            videoSuggestions.isNotEmpty() -> LazyColumn(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+            videoSuggestions.isNotEmpty() -> LazyColumn(
+                Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
+                state = suggestionList
+            ) {
                 items(videoSuggestions, key = { it.id }) { video -> VideoRow(video) { onVideo(video) } }
+                if (suggestionLoadingMore) item { Loading(Modifier.fillMaxWidth().height(64.dp)) }
             }
             suggestionLoading -> Loading()
             suggestions.isNotEmpty() -> LazyColumn(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
