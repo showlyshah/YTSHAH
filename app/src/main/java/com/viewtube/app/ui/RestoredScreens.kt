@@ -80,9 +80,6 @@ fun MiniPlayer(onOpen: (String) -> Unit) {
         IconButton(onClick = { PlayerHolder.toggle() }, modifier = Modifier.size(36.dp)) {
             Text(if (playing) "Ⅱ" else "▶", fontWeight = FontWeight.Bold, fontSize = 16.sp)
         }
-        IconButton(onClick = { PlayerHolder.playNext { nextId -> onOpen(nextId) } }, modifier = Modifier.size(36.dp)) {
-            Icon(Icons.Default.SkipNext, contentDescription = "Play next recommended video", modifier = Modifier.size(20.dp))
-        }
         IconButton(onClick = { PlayerHolder.stop() }, modifier = Modifier.size(36.dp)) {
             Icon(Icons.Default.Close, contentDescription = "Close player", modifier = Modifier.size(18.dp))
         }
