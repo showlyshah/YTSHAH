@@ -102,6 +102,22 @@ fun AccountScreen(onBack: () -> Unit) {
     var cacheBytes by remember { mutableStateOf(PlayerHolder.playbackCacheBytes()) }
     var crashReport by remember { mutableStateOf(CrashReportRecorder.read(ctx)) }
 
+    val microGAccountPicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        microGBusy = false
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            MicroGAccountSignIn.onAccountChosen(ctx, result.data)
+                .onSuccess { accountName ->
+                    microGAccount = accountName
+                    status = "Google account connected through microG. YouTube playback is not authenticated by this account link."
+                }
+                .onFailure { error ->
+                    status = "microG sign-in failed: ${error.message ?: "unknown error"}"
+                }
+        } else {
+            status = "Google account selection was cancelled."
+        }
+    }
+
     val diagnosticExport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
@@ -216,14 +232,11 @@ fun AccountScreen(onBack: () -> Unit) {
                     enabled = !microGBusy,
                     onClick = {
                         microGBusy = true
-                        MicroGAccountSignIn.connect(ctx) { result ->
+                        runCatching {
+                            microGAccountPicker.launch(MicroGAccountSignIn.createAccountChooserIntent())
+                        }.onFailure { error ->
                             microGBusy = false
-                            result.onSuccess { accountName ->
-                                microGAccount = accountName
-                                status = "Google account connected through microG. YouTube playback is not authenticated by this account link."
-                            }.onFailure { error ->
-                                status = "microG sign-in failed: ${error.message ?: "unknown error"}"
-                            }
+                            status = "Could not open the microG account picker: ${error.message ?: "unknown error"}"
                         }
                     }
                 ) { Text(if (microGBusy) "Waiting for microG..." else "Continue with microG") }
