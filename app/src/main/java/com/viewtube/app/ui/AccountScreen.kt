@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.viewtube.app.data.Graph
+import com.viewtube.app.data.MicroGAccountSignIn
 import com.viewtube.app.data.FeedDiagnostics
 import com.viewtube.app.data.RuntimeDiagnostics
 import com.viewtube.app.CrashReportRecorder
@@ -89,6 +90,8 @@ fun AccountScreen(onBack: () -> Unit) {
     var user by remember { mutableStateOf("") }
     var pass by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var microGBusy by remember { mutableStateOf(false) }
+    var microGAccount by remember { mutableStateOf(MicroGAccountSignIn.linkedAccount(ctx)) }
     var status by remember { mutableStateOf<String?>(null) }
     var confirmWipe by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
@@ -182,6 +185,53 @@ fun AccountScreen(onBack: () -> Unit) {
         Section("Your profile") {
             OutlinedTextField(nameField, { nameField = it; store.setProfileName(it) }, label = { Text("Display name (stays on this phone)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Text("${subs.size} subscriptions on this device", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+
+        Section("Google account (microG)") {
+            Text(
+                "Connect through microG's Android Google-account authenticator. ViewTube never asks for or handles your Google password.",
+                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (!MicroGAccountSignIn.isMicroGInstalled(ctx)) {
+                Text(
+                    "microG Services Core was not detected. Install and configure microG first, then return here.",
+                    fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedButton(onClick = {
+                    ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/microg/GmsCore/wiki/Installation")))
+                }) { Text("microG installation guide") }
+            } else if (microGAccount != null) {
+                Text("Google account connected: $microGAccount", fontWeight = FontWeight.Medium)
+                Text(
+                    "This connects the Android account only. It does not yet create a YouTube web session for NewPipe playback.",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedButton(onClick = {
+                    MicroGAccountSignIn.disconnect(ctx)
+                    microGAccount = null
+                    status = "ViewTube disconnected from the Google account. The account remains on your device."
+                }) { Text("Disconnect from ViewTube") }
+            } else {
+                Button(
+                    enabled = !microGBusy,
+                    onClick = {
+                        microGBusy = true
+                        MicroGAccountSignIn.connect(ctx) { result ->
+                            microGBusy = false
+                            result.onSuccess { accountName ->
+                                microGAccount = accountName
+                                status = "Google account connected through microG. YouTube playback is not authenticated by this account link."
+                            }.onFailure { error ->
+                                status = "microG sign-in failed: ${error.message ?: "unknown error"}"
+                            }
+                        }
+                    }
+                ) { Text(if (microGBusy) "Waiting for microG..." else "Continue with microG") }
+                Text(
+                    "The sign-in screen is provided by microG. This account link alone will not bypass YouTube playback or IP restrictions.",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
 
         Section("Sync across devices (optional)") {
