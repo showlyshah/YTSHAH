@@ -108,10 +108,10 @@ fun AccountScreen(onBack: () -> Unit) {
             MicroGAccountSignIn.onAccountChosen(ctx, result.data)
                 .onSuccess { accountName ->
                     microGAccount = accountName
-                    status = "Google account connected through microG. YouTube playback is not authenticated by this account link."
+                    status = "Google account selected through Morphe MicroG RE. This device-account link does not itself authenticate YouTube playback."
                 }
                 .onFailure { error ->
-                    status = "microG sign-in failed: ${error.message ?: "unknown error"}"
+                    status = "Morphe MicroG RE sign-in failed: ${error.message ?: "unknown error"}"
                 }
         } else {
             status = "Google account selection was cancelled."
@@ -203,19 +203,19 @@ fun AccountScreen(onBack: () -> Unit) {
             Text("${subs.size} subscriptions on this device", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
-        Section("Google account (microG)") {
+        Section("Google account (Morphe MicroG RE)") {
             Text(
-                "Connect through microG's Android Google-account authenticator. ViewTube never asks for or handles your Google password.",
+                "Connect through Morphe MicroG RE's Android Google-account authenticator. ViewTube never asks for or handles your Google password.",
                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             if (!MicroGAccountSignIn.isMicroGInstalled(ctx)) {
                 Text(
-                    "microG Services Core was not detected. Install and configure microG first, then return here.",
+                    "Morphe MicroG RE was not detected as the Android Google-account authenticator. Install and configure Morphe MicroG RE 7.3.2 first, then return here.",
                     fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 OutlinedButton(onClick = {
-                    ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/microg/GmsCore/wiki/Installation")))
-                }) { Text("microG installation guide") }
+                    ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/MorpheApp/MicroG-RE/releases/latest")))
+                }) { Text("Morphe MicroG RE download") }
             } else if (microGAccount != null) {
                 Text("Google account connected: $microGAccount", fontWeight = FontWeight.Medium)
                 Text(
@@ -236,12 +236,12 @@ fun AccountScreen(onBack: () -> Unit) {
                             microGAccountPicker.launch(MicroGAccountSignIn.createAccountChooserIntent())
                         }.onFailure { error ->
                             microGBusy = false
-                            status = "Could not open the microG account picker: ${error.message ?: "unknown error"}"
+                            status = "Could not open the Morphe MicroG RE account picker: ${error.message ?: "unknown error"}"
                         }
                     }
-                ) { Text(if (microGBusy) "Waiting for microG..." else "Continue with microG") }
+                ) { Text(if (microGBusy) "Waiting for Morphe MicroG RE..." else "Continue with microG") }
                 Text(
-                    "The sign-in screen is provided by microG. This account link alone will not bypass YouTube playback or IP restrictions.",
+                    "The account chooser is provided by Android's account authenticator (Morphe MicroG RE). This account link alone will not bypass YouTube playback or IP restrictions.",
                     fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
