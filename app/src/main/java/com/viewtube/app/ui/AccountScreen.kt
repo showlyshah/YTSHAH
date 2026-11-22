@@ -1,5 +1,6 @@
 package com.viewtube.app.ui
 
+import android.app.Activity
 import android.content.Intent
 import androidx.compose.animation.animateContentSize
 import android.net.Uri
@@ -103,17 +104,36 @@ fun AccountScreen(onBack: () -> Unit) {
     var crashReport by remember { mutableStateOf(CrashReportRecorder.read(ctx)) }
 
     val microGAccountPicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        microGBusy = false
-        if (result.resultCode == android.app.Activity.RESULT_OK) {
-            MicroGAccountSignIn.onAccountChosen(ctx, result.data)
+        if (result.resultCode == Activity.RESULT_OK) {
+            MicroGAccountSignIn.selectedAccountName(result.data)
                 .onSuccess { accountName ->
-                    microGAccount = accountName
-                    status = "Google account selected through Morphe MicroG RE. This device-account link does not itself authenticate YouTube playback."
+                    val activity = ctx as? Activity
+                    if (activity == null) {
+                        status = "Unable to start Morphe MicroG RE authorization from this screen."
+                    } else {
+                        scope.launch {
+                            microGBusy = true
+                            MicroGAccountSignIn.authorizeYoutubeReadOnly(activity, accountName)
+                                .onSuccess {
+                                    MicroGAccountSignIn.saveLinkedAccount(ctx, accountName)
+                                    microGAccount = accountName
+                                    status = "Morphe MicroG RE authorized ViewTube for YouTube read-only access."
+                                }
+                                .onFailure { error ->
+                                    MicroGAccountSignIn.disconnect(ctx)
+                                    microGAccount = null
+                                    status = "YouTube authorization through Morphe MicroG RE failed: ${error.message ?: "unknown error"}"
+                                }
+                            microGBusy = false
+                        }
+                    }
                 }
                 .onFailure { error ->
-                    status = "Morphe MicroG RE sign-in failed: ${error.message ?: "unknown error"}"
+                    microGBusy = false
+                    status = "Morphe MicroG RE account selection failed: ${error.message ?: "unknown error"}"
                 }
         } else {
+            microGBusy = false
             status = "Google account selection was cancelled."
         }
     }
@@ -208,18 +228,18 @@ fun AccountScreen(onBack: () -> Unit) {
                 "Connect through Morphe MicroG RE's Android Google-account authenticator. ViewTube never asks for or handles your Google password.",
                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            if (!MicroGAccountSignIn.isMicroGInstalled(ctx)) {
+            if (!MicroGAccountSignIn.isMorpheMicroGInstalled(ctx)) {
                 Text(
-                    "Morphe MicroG RE was not detected as the Android Google-account authenticator. Install and configure Morphe MicroG RE 7.3.2 first, then return here.",
+                    "Morphe MicroG RE was not detected as the active Android Google-account authenticator. Install it, add your Google account in Morphe MicroG RE, then return here.",
                     fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 OutlinedButton(onClick = {
                     ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/MorpheApp/MicroG-RE/releases/latest")))
                 }) { Text("Morphe MicroG RE download") }
             } else if (microGAccount != null) {
-                Text("Google account connected: $microGAccount", fontWeight = FontWeight.Medium)
+                Text("Google account authorized: $microGAccount", fontWeight = FontWeight.Medium)
                 Text(
-                    "This connects the Android account only. It does not yet create a YouTube web session for NewPipe playback.",
+                    "ViewTube has requested a YouTube read-only OAuth token through Morphe MicroG RE. NewPipe playback uses a separate cookie-based session, so this does not sign in the video extractor.",
                     fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 OutlinedButton(onClick = {
@@ -239,9 +259,9 @@ fun AccountScreen(onBack: () -> Unit) {
                             status = "Could not open the Morphe MicroG RE account picker: ${error.message ?: "unknown error"}"
                         }
                     }
-                ) { Text(if (microGBusy) "Waiting for Morphe MicroG RE..." else "Continue with microG") }
+                ) { Text(if (microGBusy) "Waiting for Morphe MicroG RE..." else "Continue with Morphe MicroG RE") }
                 Text(
-                    "The account chooser is provided by Android's account authenticator (Morphe MicroG RE). This account link alone will not bypass YouTube playback or IP restrictions.",
+                    "After choosing an account, ViewTube requests the YouTube read-only OAuth scope through Morphe MicroG RE. No Google password or raw token is stored by ViewTube.",
                     fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
