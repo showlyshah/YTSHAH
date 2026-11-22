@@ -5,6 +5,7 @@ Branch: rollback/previous-working-feed
 
 ## Files added
 - app/src/main/java/com/viewtube/app/data/MicroGAccountSignIn.kt
+  - Detects the standard microG, Vanced microG, and ReVanced GmsCore authenticator package variants by the registered com.google account authenticator.
   - Starts Android AccountManager addAccount for account type com.google.
   - Delegates credential entry and consent to the installed system authenticator (microG when microG Services Core is installed and registered).
   - Stores only the returned account display name locally in ViewTube preferences.
@@ -12,7 +13,7 @@ Branch: rollback/previous-working-feed
 
 ## Existing files changed
 - app/src/main/AndroidManifest.xml
-  - Added package visibility query for com.google.android.gms.
+  - Added package visibility queries for standard microG, Vanced microG, and ReVanced GmsCore package variants.
 - app/src/main/java/com/viewtube/app/ui/AccountScreen.kt
   - Added Google account (microG) section, sign-in status, and local disconnect action.
   - Existing Piped sign-in and other settings retained.
