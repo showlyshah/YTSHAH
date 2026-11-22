@@ -26,10 +26,20 @@ object MicroGAccountSignIn {
 
     fun isMicroGInstalled(context: Context): Boolean {
         return try {
-            val info = context.packageManager.getApplicationInfo(GOOGLE_SERVICES_PACKAGE, 0)
-            context.packageManager.getApplicationLabel(info)
-                .toString()
-                .contains("microg", ignoreCase = true)
+            val authenticator = AccountManager.get(context).authenticatorTypes
+                .firstOrNull { it.type == GOOGLE_ACCOUNT_TYPE }
+                ?: return false
+
+            when (authenticator.packageName) {
+                "com.mgoogle.android.gms", "app.revanced.android.gms" -> true
+                GOOGLE_SERVICES_PACKAGE -> {
+                    val info = context.packageManager.getApplicationInfo(authenticator.packageName, 0)
+                    context.packageManager.getApplicationLabel(info)
+                        .toString()
+                        .contains("microg", ignoreCase = true)
+                }
+                else -> false
+            }
         } catch (_: PackageManager.NameNotFoundException) {
             false
         } catch (_: Exception) {
