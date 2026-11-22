@@ -127,7 +127,7 @@ class PlaybackService : MediaSessionService() {
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
             })
-            .setCustomLayout(ImmutableList.of(previousButton, playPauseButton(), nextButton, stopButton))
+            .setMediaButtonPreferences(ImmutableList.of(previousButton, playPauseButton(), nextButton, stopButton))
             .build()
         PlayerHolder.player.addListener(notificationPlayerListener)
     }
