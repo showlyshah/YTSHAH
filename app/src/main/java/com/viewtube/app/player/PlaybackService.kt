@@ -52,7 +52,6 @@ class PlaybackService : MediaSessionService() {
                         .buildUpon().add(stopCommand).build()
                     return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                         .setAvailableSessionCommands(commands)
-                        .setCustomLayout(ImmutableList.of(stopButton))
                         .build()
                 }
 
@@ -70,7 +69,6 @@ class PlaybackService : MediaSessionService() {
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
             })
-            .setCustomLayout(ImmutableList.of(stopButton))
             .build()
     }
 
