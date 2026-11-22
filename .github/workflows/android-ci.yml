@@ -2,7 +2,7 @@ name: Android CI
 
 on:
   push:
-    branches: [main, upgrade/original-codebase]
+    branches: [main, upgrade/original-codebase, feature/player-controls-aspect-zoom]
   pull_request:
     branches: [main]
   workflow_dispatch:
