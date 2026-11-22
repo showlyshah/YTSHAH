@@ -71,6 +71,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.common.ForwardingPlayer
+import androidx.media3.common.Player
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.viewtube.app.data.Comment
@@ -122,6 +124,20 @@ fun WatchScreen(
         }.getOrDefault(false)
     }
     val scope = rememberCoroutineScope()
+    val latestOnVideo by androidx.compose.runtime.rememberUpdatedState(onVideo)
+    // Media3's stock Next button calls seekToNextMediaItem(). The app has a single-item
+    // ExoPlayer timeline, so intercept that exact action and route it to ViewTube discovery.
+    val controllerPlayer = remember {
+        object : ForwardingPlayer(PlayerHolder.player) {
+            override fun isCommandAvailable(command: Int): Boolean =
+                if (command == Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM) true
+                else super.isCommandAvailable(command)
+
+            override fun seekToNextMediaItem() {
+                PlayerHolder.playNext { id -> latestOnVideo(id) }
+            }
+        }
+    }
     var details by remember { mutableStateOf<VideoDetails?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var attempt by remember { mutableStateOf(0) }
@@ -218,27 +234,17 @@ fun WatchScreen(
             AndroidView(
                 factory = { c ->
                     PlayerView(c).apply {
-                        player = PlayerHolder.player
+                        player = controllerPlayer
                         resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                         setShowSubtitleButton(true)
                         setShowNextButton(true)
                         setShowPreviousButton(true)
-                        findViewById<android.view.View>(androidx.media3.ui.R.id.exo_next)?.apply {
-                            isEnabled = true
-                            alpha = 1f
-                            setOnClickListener { PlayerHolder.playNext { nextId -> onVideo(nextId) } }
-                        }
                     }
                 },
                 update = { view ->
-                    view.player = PlayerHolder.player
+                    view.player = controllerPlayer
                     view.setShowNextButton(true)
                     view.setShowPreviousButton(true)
-                    view.findViewById<android.view.View>(androidx.media3.ui.R.id.exo_next)?.apply {
-                        isEnabled = true
-                        alpha = 1f
-                        setOnClickListener { PlayerHolder.playNext { nextId -> onVideo(nextId) } }
-                    }
                 },
                 modifier = Modifier.fillMaxSize()
             )
