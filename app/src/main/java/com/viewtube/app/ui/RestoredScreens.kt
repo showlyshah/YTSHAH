@@ -206,6 +206,7 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
                                 factory = { context ->
                                     PlayerView(context).apply {
                                         player = shortsPlayer.playerFor(page)
+                                        keepScreenOn = shortsPlaying
                                         resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                                         useController = false
                                         setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
@@ -215,6 +216,7 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
                                     if (view.player !== shortsPlayer.playerFor(page)) {
                                         view.player = shortsPlayer.playerFor(page)
                                     }
+                                    view.keepScreenOn = shortsPlaying
                                 },
                                 modifier = Modifier.fillMaxSize().clickable {
                                     shortsPlayer.togglePlayPause(page)
