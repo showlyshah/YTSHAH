@@ -133,6 +133,13 @@ fun WatchScreen(
                 if (command == Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM) true
                 else super.isCommandAvailable(command)
 
+            override fun getAvailableCommands(): Player.Commands =
+                super.getAvailableCommands().buildUpon()
+                    .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                    .build()
+
+            override fun hasNextMediaItem(): Boolean = true
+
             override fun seekToNextMediaItem() {
                 PlayerHolder.playNext { id -> latestOnVideo(id) }
             }
