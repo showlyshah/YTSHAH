@@ -63,7 +63,7 @@ class PlaybackService : MediaSessionService() {
 
     private fun updateNotificationLayout() {
         session?.let { mediaSession ->
-            mediaSession.setCustomLayout(ImmutableList.of(previousButton, playPauseButton(), nextButton, stopButton))
+            mediaSession.setMediaButtonPreferences(ImmutableList.of(previousButton, playPauseButton(), nextButton, stopButton))
         }
     }
 
@@ -105,7 +105,7 @@ class PlaybackService : MediaSessionService() {
                                 .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
                                 .build()
                         )
-                        .setCustomLayout(ImmutableList.of(previousButton, playPauseButton(), nextButton, stopButton))
+                        .setMediaButtonPreferences(ImmutableList.of(previousButton, playPauseButton(), nextButton, stopButton))
                         .build()
                 }
 
