@@ -45,20 +45,20 @@ class PlaybackService : MediaSessionService() {
 
     @Suppress("DEPRECATION")
     private val previousButton: CommandButton by lazy {
-        CommandButton.Builder().setDisplayName("Previous")
-            .setIconResId(android.R.drawable.ic_media_previous)
+        CommandButton.Builder(CommandButton.ICON_PREVIOUS)
+            .setDisplayName("Previous")
             .setSessionCommand(previousCommand).build()
     }
     @Suppress("DEPRECATION")
     private val nextButton: CommandButton by lazy {
-        CommandButton.Builder().setDisplayName("Next")
-            .setIconResId(android.R.drawable.ic_media_next)
+        CommandButton.Builder(CommandButton.ICON_NEXT)
+            .setDisplayName("Next")
             .setSessionCommand(nextCommand).build()
     }
     @Suppress("DEPRECATION")
     private fun playPauseButton(): CommandButton =
-        CommandButton.Builder().setDisplayName(if (PlayerHolder.player.playWhenReady) "Pause" else "Play")
-            .setIconResId(if (PlayerHolder.player.playWhenReady) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play)
+        CommandButton.Builder(if (PlayerHolder.player.playWhenReady) CommandButton.ICON_PAUSE else CommandButton.ICON_PLAY)
+            .setDisplayName(if (PlayerHolder.player.playWhenReady) "Pause" else "Play")
             .setPlayerCommand(Player.COMMAND_PLAY_PAUSE).build()
 
     private fun updateNotificationLayout() {
@@ -74,9 +74,8 @@ class PlaybackService : MediaSessionService() {
 
     @Suppress("DEPRECATION")
     private val stopButton: CommandButton by lazy {
-        CommandButton.Builder()
+        CommandButton.Builder(CommandButton.ICON_STOP)
             .setDisplayName("Stop")
-            .setIconResId(R.drawable.ic_stop)
             .setSessionCommand(stopCommand)
             .build()
     }
