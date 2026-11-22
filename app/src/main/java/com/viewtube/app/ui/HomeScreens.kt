@@ -135,9 +135,9 @@ fun HomeScreen(
         if (granted) scope.launch { localArea = LocationRecommendations.refresh(context) }
     }
     val list = rememberLazyListState()
-    var category by remember { mutableStateOf("All") }
-    var videos by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
-    var mixer by remember { mutableStateOf<FeedMixer?>(null) }
+    var category by remember { mutableStateOf(FeedSessionCache.homeCategory) }
+    var videos by remember { mutableStateOf(FeedSessionCache.homeVideos) }
+    var mixer by remember { mutableStateOf(FeedSessionCache.homeMixer) }
     var loading by remember { mutableStateOf(true) }
     var loadingMore by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
@@ -151,6 +151,13 @@ fun HomeScreen(
 
     LaunchedEffect(category, reload, localArea) {
         error = null
+        if (reload == 0 && FeedSessionCache.homeLoaded && category == FeedSessionCache.homeCategory) {
+            videos = FeedSessionCache.homeVideos
+            mixer = FeedSessionCache.homeMixer
+            loading = false
+            refreshing = false
+            return@LaunchedEffect
+        }
         if (!refreshing) { loading = true; videos = emptyList() }
         val m = FeedMixer(topicsFor(category, localArea), Graph.repo) { !it.isShort && it.durationSec != 0L }
         mixer = m
@@ -162,6 +169,10 @@ fun HomeScreen(
         val all = (fromSubs + first).distinctBy { it.id }
         if (all.isEmpty()) error = "No videos came back. Check your connection and try again."
         videos = all
+        FeedSessionCache.homeCategory = category
+        FeedSessionCache.homeVideos = all
+        FeedSessionCache.homeMixer = m
+        FeedSessionCache.homeLoaded = true
         loading = false; refreshing = false
     }
 
@@ -172,6 +183,8 @@ fun HomeScreen(
             val more = runCatching { m.more(10) }.getOrDefault(emptyList())
             val known = videos.map { it.id }.toSet()
             videos = videos + more.filter { it.id !in known }
+            FeedSessionCache.homeVideos = videos
+            FeedSessionCache.homeMixer = m
             loadingMore = false
         }
     }
