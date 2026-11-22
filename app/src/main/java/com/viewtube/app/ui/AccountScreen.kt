@@ -5,6 +5,7 @@ import androidx.compose.animation.animateContentSize
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -27,6 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -45,6 +47,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.viewtube.app.data.Graph
 import com.viewtube.app.data.FeedDiagnostics
 import com.viewtube.app.data.RuntimeDiagnostics
@@ -481,7 +485,19 @@ fun AccountScreen(onBack: () -> Unit) {
         confirmButton = { TextButton(onClick = { Graph.piped.signOut(); store.wipeAll(); Graph.secure.clear(); confirmWipe = false; status = "All data deleted." }) { Text("Delete") } },
         dismissButton = { TextButton(onClick = { confirmWipe = false }) { Text("Cancel") } }
     )
-    if (showAbout) AboutScreen(onBack = { showAbout = false })
+    if (showAbout) {
+        Dialog(
+            onDismissRequest = { showAbout = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background
+            ) {
+                AboutScreen(onBack = { showAbout = false })
+            }
+        }
+    }
 }
 
 @Composable
@@ -510,13 +526,20 @@ private fun AboutScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val versionName = runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "unknown"
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 32.dp)
+        Modifier.fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .verticalScroll(rememberScrollState())
+            .padding(bottom = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
-            Text("About ViewTube", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+            Text("About ViewTube", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
         }
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("ViewTube", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
@@ -528,20 +551,20 @@ private fun AboutScreen(onBack: () -> Unit) {
                 color = MaterialTheme.colorScheme.secondary
             )
             HorizontalDivider()
-            Text("AI credits", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
-            Text("On-device BasicLocalAiEngine provides local heuristic analysis. An optional OpenAI-compatible model endpoint can be configured by the user. No specific third-party model is bundled with ViewTube; the configured provider and model are user-selected.")
+            Text("AI credits", fontWeight = FontWeight.SemiBold, fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurface)
+            Text("On-device BasicLocalAiEngine provides local heuristic analysis. An optional OpenAI-compatible model endpoint can be configured by the user. No specific third-party model is bundled with ViewTube; the configured provider and model are user-selected.", color = MaterialTheme.colorScheme.onSurface)
             HorizontalDivider()
-            Text("Open-source credits", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
-            Text("• NewPipe Extractor — YouTube metadata and stream extraction")
-            Text("• YouFlow — reference for the Shorts player preloading architecture (GPL-3.0)")
-            Text("• AndroidX Media3 / ExoPlayer — playback and media session")
-            Text("• Jetpack Compose & Material 3 — app interface")
-            Text("• Coil — image loading and thumbnail caching")
-            Text("• OkHttp — network transport")
-            Text("• SponsorBlock — community segment data")
+            Text("Open-source credits", fontWeight = FontWeight.SemiBold, fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurface)
+            Text("• NewPipe Extractor — YouTube metadata and stream extraction", color = MaterialTheme.colorScheme.onSurface)
+            Text("• YouFlow — reference for the Shorts player preloading architecture (GPL-3.0)", color = MaterialTheme.colorScheme.onSurface)
+            Text("• AndroidX Media3 / ExoPlayer — playback and media session", color = MaterialTheme.colorScheme.onSurface)
+            Text("• Jetpack Compose & Material 3 — app interface", color = MaterialTheme.colorScheme.onSurface)
+            Text("• Coil — image loading and thumbnail caching", color = MaterialTheme.colorScheme.onSurface)
+            Text("• OkHttp — network transport", color = MaterialTheme.colorScheme.onSurface)
+            Text("• SponsorBlock — community segment data", color = MaterialTheme.colorScheme.onSurface)
             HorizontalDivider()
-            Text("Source code and third-party notices", fontWeight = FontWeight.SemiBold)
-            Text("github.com/showlyshah/YTSHAH")
+            Text("Source code and third-party notices", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+            Text("github.com/showlyshah/YTSHAH", color = MaterialTheme.colorScheme.onSurface)
         }
     }
 }
