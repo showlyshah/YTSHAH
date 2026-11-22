@@ -2,7 +2,7 @@ name: Android CI
 
 on:
   push:
-    branches: [main, upgrade/original-codebase, rebuild/open-source-feeds]
+    branches: [main, upgrade/original-codebase, rebuild/open-source-feeds, rollback/previous-working-feed]
   pull_request:
     branches: [main]
   workflow_dispatch:
