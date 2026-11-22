@@ -11,6 +11,8 @@
 
     <queries>
         <package android:name="com.google.android.gms" />
+        <package android:name="com.mgoogle.android.gms" />
+        <package android:name="app.revanced.android.gms" />
     </queries>
 
     <application
