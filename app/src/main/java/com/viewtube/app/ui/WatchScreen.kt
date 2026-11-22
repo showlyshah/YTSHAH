@@ -13,6 +13,7 @@ import kotlin.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -60,6 +61,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
@@ -114,6 +117,8 @@ fun WatchScreen(
     val ctx = LocalContext.current
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     var fullscreen by remember { mutableStateOf(false) }
+    var screenMode by remember { mutableStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
+    var zoom by remember { mutableStateOf(1f) }
     val immersivePlayer = fullscreen || landscape
     val hdrDisplaySupported = remember(ctx) {
         runCatching {
@@ -208,7 +213,11 @@ fun WatchScreen(
     androidx.activity.compose.BackHandler(enabled = fullscreen) { fullscreen = false }
 
     val playerBox: @Composable (Modifier) -> Unit = { mod ->
-        Box(mod.background(Color.Black).pointerInput(fullscreen) {
+        Box(mod.background(Color.Black).clipToBounds().pointerInput(zoom) {
+            detectTransformGestures { _, _, zoomChange, _ ->
+                zoom = (zoom * zoomChange).coerceIn(0.5f, 2.0f)
+            }
+        }.pointerInput(fullscreen) {
             var drag = 0f
             detectVerticalDragGestures(onVerticalDrag = { _, amount ->
                 drag += amount
@@ -219,12 +228,18 @@ fun WatchScreen(
                 factory = { c ->
                     PlayerView(c).apply {
                         player = PlayerHolder.player
-                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        resizeMode = screenMode
                         setShowSubtitleButton(true)
                     }
                 },
-                update = { it.player = PlayerHolder.player },
-                modifier = Modifier.fillMaxSize()
+                update = { view ->
+                    view.player = PlayerHolder.player
+                    view.resizeMode = screenMode
+                },
+                modifier = Modifier.fillMaxSize().graphicsLayer {
+                    scaleX = zoom
+                    scaleY = zoom
+                }
             )
             if (!immersivePlayer) IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart)) {
                 Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Minimize", tint = Color.White)
@@ -478,6 +493,17 @@ fun WatchScreen(
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp), fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            SheetTitle("Screen aspect ratio")
+            SheetRow("Fit (show entire video)", screenMode == AspectRatioFrameLayout.RESIZE_MODE_FIT) {
+                screenMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+            }
+            SheetRow("Fill (stretch to screen)", screenMode == AspectRatioFrameLayout.RESIZE_MODE_FILL) {
+                screenMode = AspectRatioFrameLayout.RESIZE_MODE_FILL
+            }
+            SheetRow("Zoom to fill (crop edges)", screenMode == AspectRatioFrameLayout.RESIZE_MODE_ZOOM) {
+                screenMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+            }
+            SheetRow("Reset pinch zoom (${(zoom * 100).toInt()}%)", zoom != 1f) { zoom = 1f }
             SheetTitle("Playback speed")
             listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f).forEach { sp ->
                 SheetRow(if (sp == 1f) "Normal" else "${sp}x", speed == sp) { PlayerHolder.setSpeed(sp); sheet = false }
