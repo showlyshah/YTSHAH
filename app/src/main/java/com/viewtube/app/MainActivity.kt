@@ -47,10 +47,11 @@ import androidx.navigation.navArgument
 import com.viewtube.app.data.videoIdFromUrl
 import com.viewtube.app.data.RuntimeDiagnostics
 import com.viewtube.app.player.PlayerHolder
+import com.viewtube.app.player.ShortsPlayerController
 import com.viewtube.app.ui.ChannelScreen
 import com.viewtube.app.ui.CreatorsScreen
 import com.viewtube.app.ui.HomeScreen
-import com.viewtube.app.ui.MiniPlayer
+import com.viewtube.app.ui.AppMiniPlayer
 import com.viewtube.app.ui.SearchScreen
 import com.viewtube.app.ui.SettingsScreen
 import com.viewtube.app.ui.ShortsScreen
@@ -182,7 +183,19 @@ class MainActivity : ComponentActivity() {
             containerColor = androidx.compose.material3.MaterialTheme.colorScheme.background,
             bottomBar = {
                 Column {
-                    if (!route.startsWith("watch/") && route != "shorts") MiniPlayer { id -> nav.navigate("watch/$id") }
+                    if (!route.startsWith("watch/") && route != "shorts") {
+                        AppMiniPlayer(
+                            onOpenVideo = { id -> nav.navigate("watch/$id") },
+                            onOpenShorts = {
+                                ShortsPlayerController.get().restore()
+                                nav.navigate("shorts") {
+                                    popUpTo("home") { saveState = true }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            }
+                        )
+                    }
                     if (showBar) NavigationBar(containerColor = androidx.compose.material3.MaterialTheme.colorScheme.background) {
                         tabs.forEach { (r, label, icon) ->
                             NavigationBarItem(
@@ -223,7 +236,20 @@ class MainActivity : ComponentActivity() {
                             onChannel = { nav.openChannel(it) },
                         )
                     }
-                    composable("shorts") { ShortsScreen(onChannel = { nav.openChannel(it) }, onVideo = { nav.navigate("watch/${it.id}") }) }
+                    composable("shorts") {
+                        ShortsScreen(
+                            onChannel = { nav.openChannel(it) },
+                            onVideo = { nav.navigate("watch/${it.id}") },
+                            onMinimize = {
+                                ShortsPlayerController.get().minimize()
+                                nav.navigate("home") {
+                                    popUpTo("home") { saveState = true }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            }
+                        )
+                    }
                     composable("creators") {
                         CreatorsScreen(
                             onSearch = { nav.navigate("search") },
