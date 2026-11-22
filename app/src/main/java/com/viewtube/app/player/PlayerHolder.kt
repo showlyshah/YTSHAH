@@ -157,9 +157,14 @@ object PlayerHolder {
         val queued = Graph.store.queue.value.firstOrNull { it.id != d.video.id }
         val recommendation = d.related.firstOrNull { it.id != d.video.id && !Graph.store.isWatched(it.id) }
             ?: d.related.firstOrNull { it.id != d.video.id }
-        val nextId = queued?.id ?: recommendation?.id ?: return
         scope.launch {
             runCatching {
+                // Related items are occasionally omitted by the extractor. Keep Next useful
+                // by falling back to the region-aware discovery feed instead of silently doing nothing.
+                val nextId = queued?.id ?: recommendation?.id
+                    ?: Graph.repo.trending().firstOrNull { it.id != d.video.id && !Graph.store.isWatched(it.id) }?.id
+                    ?: Graph.repo.trending().firstOrNull { it.id != d.video.id }?.id
+                    ?: throw IllegalStateException("No next video is available right now.")
                 val nextDetails = Graph.repo.details(nextId)
                 if (queued != null) Graph.store.removeFromQueue(nextId)
                 Graph.store.addHistory(nextDetails.video)
