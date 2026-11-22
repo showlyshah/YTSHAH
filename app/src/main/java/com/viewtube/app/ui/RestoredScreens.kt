@@ -55,8 +55,16 @@ import com.viewtube.app.player.ShortsPlayerController
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
-
-
+internal object FeedSessionCache {
+    var homeCategory: String = "All"
+    var homeVideos: List<VideoItem> = emptyList()
+    var homeMixer: com.viewtube.app.data.FeedMixer? = null
+    var homeLoaded: Boolean = false
+    var shortsVideos: List<VideoItem> = emptyList()
+    var shortsNext: (suspend () -> Paged<VideoItem>)? = null
+    var shortsLoaded: Boolean = false
+    var shortsPage: Int = 0
+}
 
 @Composable
 fun MiniPlayer(onOpen: (String) -> Unit) {
@@ -91,15 +99,22 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
     val loadingSlots by shortsPlayer.loading.collectAsStateCompat()
     val failed by shortsPlayer.failed.collectAsStateCompat()
     val shortsPlaying by shortsPlayer.playing.collectAsStateCompat()
-    var videos by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
-    var nextPage by remember { mutableStateOf<(suspend () -> Paged<VideoItem>)?>(null) }
+    var videos by remember { mutableStateOf(FeedSessionCache.shortsVideos) }
+    var nextPage by remember { mutableStateOf(FeedSessionCache.shortsNext) }
     var loading by remember { mutableStateOf(true) }
     var loadingMore by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableStateOf(0) }
-    val pagerState = androidx.compose.foundation.pager.rememberPagerState(pageCount = { videos.size })
+    val pagerState = androidx.compose.foundation.pager.rememberPagerState(initialPage = FeedSessionCache.shortsPage, pageCount = { videos.size })
 
     LaunchedEffect(reload) {
+        if (reload == 0 && FeedSessionCache.shortsLoaded) {
+            videos = FeedSessionCache.shortsVideos
+            nextPage = FeedSessionCache.shortsNext
+            loading = false
+            error = null
+            return@LaunchedEffect
+        }
         loading = true
         error = null
         videos = emptyList()
@@ -118,6 +133,10 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
         }.onSuccess { page ->
             videos = page.items.distinctBy { it.id }
             nextPage = page.next
+            FeedSessionCache.shortsVideos = videos
+            FeedSessionCache.shortsNext = nextPage
+            FeedSessionCache.shortsLoaded = true
+            FeedSessionCache.shortsPage = 0
             FeedDiagnostics.record("shorts", "initial-feed", if (videos.isEmpty()) "empty" else "success",
                 android.os.SystemClock.elapsedRealtime() - started, videos.size,
                 detail = "source=channel-shorts-tabs, three-slot-player=true, continuation=${page.next != null}")
@@ -141,6 +160,8 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
                     val known = videos.mapTo(HashSet()) { it.id }
                     videos = videos + page.items.filter { known.add(it.id) }
                     nextPage = page.next
+                    FeedSessionCache.shortsVideos = videos
+                    FeedSessionCache.shortsNext = nextPage
                 }
                 .onFailure {
                     if (it is CancellationException) throw it
@@ -151,6 +172,7 @@ fun ShortsScreen(onChannel: (String) -> Unit, onVideo: (VideoItem) -> Unit) {
     }
 
     LaunchedEffect(pagerState.currentPage, videos.size) {
+        if (videos.isNotEmpty()) FeedSessionCache.shortsPage = pagerState.currentPage
         if (videos.isNotEmpty() && pagerState.currentPage >= videos.size - 3) loadMore()
     }
 
