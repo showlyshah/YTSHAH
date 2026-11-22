@@ -218,6 +218,8 @@ fun SearchScreen(initialQuery: String, onBack: () -> Unit, onVideo: (VideoItem) 
     var query by remember { mutableStateOf(initialQuery) }
     var submitted by remember { mutableStateOf(initialQuery) }
     var suggestions by remember { mutableStateOf<List<String>>(emptyList()) }
+    var videoSuggestions by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
+    var suggestionLoading by remember { mutableStateOf(false) }
     var results by remember { mutableStateOf<List<Item>>(emptyList()) }
     var next by remember { mutableStateOf<(suspend () -> Paged<Item>)?>(null) }
     var loading by remember { mutableStateOf(false) }
@@ -227,7 +229,7 @@ fun SearchScreen(initialQuery: String, onBack: () -> Unit, onVideo: (VideoItem) 
 
     fun run(q: String) {
         if (q.isBlank()) return
-        submitted = q; query = q; suggestions = emptyList()
+        submitted = q; query = q; suggestions = emptyList(); videoSuggestions = emptyList()
         scope.launch {
             loading = true; error = null
             runCatching { Graph.repo.search(q) }
@@ -239,9 +241,24 @@ fun SearchScreen(initialQuery: String, onBack: () -> Unit, onVideo: (VideoItem) 
 
     LaunchedEffect(Unit) { if (initialQuery.isNotBlank()) run(initialQuery) }
     LaunchedEffect(query) {
-        if (query == submitted || query.isBlank()) { suggestions = emptyList(); return@LaunchedEffect }
-        kotlinx.coroutines.delay(250)
-        suggestions = Graph.repo.suggestions(query).take(8)
+        if (query == submitted || query.isBlank()) {
+            suggestions = emptyList()
+            videoSuggestions = emptyList()
+            suggestionLoading = false
+            return@LaunchedEffect
+        }
+        kotlinx.coroutines.delay(350)
+        suggestionLoading = true
+        runCatching { Graph.repo.search(query) }
+            .onSuccess { page ->
+                videoSuggestions = page.items.filterIsInstance<VideoItem>().distinctBy { it.id }.take(8)
+                suggestions = if (videoSuggestions.isEmpty()) Graph.repo.suggestions(query).take(8) else emptyList()
+            }
+            .onFailure {
+                videoSuggestions = emptyList()
+                suggestions = runCatching { Graph.repo.suggestions(query).take(8) }.getOrDefault(emptyList())
+            }
+        suggestionLoading = false
     }
 
     LoadMoreEffect(list, next != null && !loadingMore) {
@@ -256,7 +273,11 @@ fun SearchScreen(initialQuery: String, onBack: () -> Unit, onVideo: (VideoItem) 
     Column(Modifier.fillMaxSize()) {
         SearchBar(query, onChange = { query = it }, onSubmit = { run(query) }, onBack = onBack)
         when {
-            suggestions.isNotEmpty() -> LazyColumn {
+            videoSuggestions.isNotEmpty() -> LazyColumn(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+                items(videoSuggestions, key = { it.id }) { video -> VideoRow(video) { onVideo(video) } }
+            }
+            suggestionLoading -> Loading()
+            suggestions.isNotEmpty() -> LazyColumn(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
                 items(suggestions) { s ->
                     Row(Modifier.fillMaxWidth().clickable { run(s) }.padding(horizontal = 16.dp, vertical = 14.dp)) {
                         Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
