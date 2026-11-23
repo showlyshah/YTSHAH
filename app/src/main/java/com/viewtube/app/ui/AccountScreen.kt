@@ -104,6 +104,7 @@ fun AccountScreen(onBack: () -> Unit) {
     var crashReport by remember { mutableStateOf(CrashReportRecorder.read(ctx)) }
 
     val microGAccountPicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        RuntimeDiagnostics.record("MICROG_ACCOUNT", "picker-result", if (result.resultCode == Activity.RESULT_OK) "ok" else "cancelled", "resultCode=" + result.resultCode + "; dataPresent=" + (result.data != null))
         if (result.resultCode == Activity.RESULT_OK) {
             MicroGAccountSignIn.selectedAccountName(result.data)
                 .onSuccess { accountName ->
@@ -116,11 +117,13 @@ fun AccountScreen(onBack: () -> Unit) {
                             microGBusy = true
                             MicroGAccountSignIn.authorizeYoutubeReadOnly(activity, accountName)
                                 .onSuccess {
+                                    RuntimeDiagnostics.record("MICROG_ACCOUNT", "oauth-result", "success", "OAuth token returned; token value discarded")
                                     MicroGAccountSignIn.saveLinkedAccount(ctx, accountName)
                                     microGAccount = accountName
                                     status = "Morphe MicroG RE authorized ViewTube for YouTube read-only access."
                                 }
                                 .onFailure { error ->
+                                    RuntimeDiagnostics.record("MICROG_ACCOUNT", "oauth-result", "failure", error = error)
                                     MicroGAccountSignIn.disconnect(ctx)
                                     microGAccount = null
                                     status = "YouTube authorization through Morphe MicroG RE failed: ${error.message ?: "unknown error"}"
@@ -445,6 +448,12 @@ fun AccountScreen(onBack: () -> Unit) {
                 "Focused Home & Shorts diagnostics only: feed source attempts, endpoint stages, response counts, extraction results, pagination, timings and feed-specific exceptions. Up to 100 recent events are kept locally. Nothing is uploaded.",
                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = {
+                    clipboard.setText(AnnotatedString(RuntimeDiagnostics.report(ctx)))
+                    status = "Complete diagnostic report copied. Paste it here."
+                }) { Text("Copy complete diagnostic report") }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = {
                     clipboard.setText(AnnotatedString(FeedDiagnostics.report()))
