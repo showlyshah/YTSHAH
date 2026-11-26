@@ -112,6 +112,10 @@ fun WatchScreen(
     val prefHeight by Graph.store.preferredHeight.collectAsStateCompat()
     val height by PlayerHolder.height.collectAsStateCompat()
     val notice by PlayerHolder.skipNotice.collectAsStateCompat()
+    val pendingSegment by PlayerHolder.pendingSegment.collectAsStateCompat()
+    val undoAvailable by PlayerHolder.undoAvailable.collectAsStateCompat()
+    val sponsorEnabled by Graph.store.sponsorSkip.collectAsStateCompat()
+    val sponsorAutoSkip by Graph.store.sponsorAutoSkip.collectAsStateCompat()
     val subs by Graph.store.subs.collectAsStateCompat()
     val later by Graph.store.later.collectAsStateCompat()
 
@@ -207,12 +211,25 @@ fun WatchScreen(
             ) {
                 Icon(Icons.Default.MoreVert, contentDescription = "Playback settings", tint = Color.White)
             }
-            notice?.let {
-                Text(
-                    it, color = Color.White, fontSize = 13.sp,
-                    modifier = Modifier.align(Alignment.BottomStart).padding(12.dp)
-                        .clip(RoundedCornerShape(16.dp)).background(Color(0xCC000000)).padding(horizontal = 12.dp, vertical = 6.dp)
-                )
+            if (sponsorEnabled && !sponsorAutoSkip && pendingSegment != null) {
+                val categoryName = pendingSegment!!.category.replace('_', ' ')
+                TextButton(
+                    onClick = { PlayerHolder.skipPendingSegment() },
+                    modifier = Modifier.align(Alignment.BottomStart).padding(8.dp),
+                ) {
+                    Text("Skip $categoryName segment", color = Color.White,
+                        modifier = Modifier.clip(RoundedCornerShape(18.dp)).background(Color(0xCC000000)).padding(horizontal = 12.dp, vertical = 7.dp))
+                }
+            }
+            notice?.let { message ->
+                Row(
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp)
+                        .clip(RoundedCornerShape(18.dp)).background(Color(0xCC000000)).padding(horizontal = 8.dp, vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(message, color = Color.White, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
+                    if (undoAvailable) TextButton(onClick = { PlayerHolder.undoLastSkip() }) { Text("Undo", color = Color.White) }
+                }
             }
         }
     }
