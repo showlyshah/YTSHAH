@@ -56,6 +56,8 @@ fun AccountScreen(onBack: () -> Unit) {
     val server by store.pipedServer.collectAsStateCompat()
     val pipedUser by store.pipedUser.collectAsStateCompat()
     val sponsor by store.sponsorSkip.collectAsStateCompat()
+    val sponsorAuto by store.sponsorAutoSkip.collectAsStateCompat()
+    val sponsorCategories by store.sponsorCategories.collectAsStateCompat()
     val autoplay by store.autoplayNext.collectAsStateCompat()
     val subs by store.subs.collectAsStateCompat()
 
@@ -129,7 +131,23 @@ fun AccountScreen(onBack: () -> Unit) {
         }
 
         Section("Playback") {
-            ToggleRow("Skip sponsor & promo segments", "Uses the community SponsorBlock list", sponsor) { store.setSponsorSkip(it) }
+            ToggleRow("SponsorBlock", "Uses community-submitted segment timestamps", sponsor) { store.setSponsorSkip(it) }
+            if (sponsor) {
+                ToggleRow("Automatically skip detected segments", "Off shows a skip button when a segment is reached", sponsorAuto) { store.setSponsorAutoSkip(it) }
+                Text("Categories", fontWeight = FontWeight.Medium)
+                val categories = listOf(
+                    "sponsor" to "Sponsor",
+                    "selfpromo" to "Creator self-promotion",
+                    "interaction" to "Subscribe / like reminders",
+                    "intro" to "Intro",
+                    "outro" to "Outro",
+                    "preview" to "Preview / recap",
+                    "music_offtopic" to "Non-music section"
+                )
+                categories.forEach { (id, label) ->
+                    ToggleRow(label, null, id in sponsorCategories) { store.setSponsorCategory(id, it) }
+                }
+            }
             ToggleRow("Autoplay next video", null, autoplay) { store.setAutoplayNext(it) }
         }
 
