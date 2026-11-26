@@ -22,6 +22,8 @@ class LocalStore(context: Context) {
     private val _searches = MutableStateFlow(loadStrings("searches"))
     private val _prefHeight = MutableStateFlow(prefs.getInt("pref_height", 0))
     private val _sponsorSkip = MutableStateFlow(prefs.getBoolean("sponsor_skip", true))
+    private val _sponsorAutoSkip = MutableStateFlow(prefs.getBoolean("sponsor_auto_skip", true))
+    private val _sponsorCategories = MutableStateFlow(loadSponsorCategories())
     private val _autoplay = MutableStateFlow(prefs.getBoolean("autoplay_next", true))
     private val _pipedServer = MutableStateFlow(prefs.getString("piped_server", "https://pipedapi.adminforge.de").orEmpty())
     private val _pipedUser = MutableStateFlow(prefs.getString("piped_user", "")?.ifBlank { null })
@@ -35,6 +37,8 @@ class LocalStore(context: Context) {
     /** Preferred video height in pixels, 0 = automatic. */
     val preferredHeight: StateFlow<Int> = _prefHeight.asStateFlow()
     val sponsorSkip: StateFlow<Boolean> = _sponsorSkip.asStateFlow()
+    val sponsorAutoSkip: StateFlow<Boolean> = _sponsorAutoSkip.asStateFlow()
+    val sponsorCategories: StateFlow<Set<String>> = _sponsorCategories.asStateFlow()
     val autoplayNext: StateFlow<Boolean> = _autoplay.asStateFlow()
     val pipedServer: StateFlow<String> = _pipedServer.asStateFlow()
     val pipedUser: StateFlow<String?> = _pipedUser.asStateFlow()
@@ -112,6 +116,12 @@ class LocalStore(context: Context) {
     fun setProfileName(name: String) { _profile.value = name.trim(); prefs.edit().putString("profile_name", name.trim()).apply() }
     fun setPreferredHeight(h: Int) { _prefHeight.value = h; prefs.edit().putInt("pref_height", h).apply() }
     fun setSponsorSkip(on: Boolean) { _sponsorSkip.value = on; prefs.edit().putBoolean("sponsor_skip", on).apply() }
+    fun setSponsorAutoSkip(on: Boolean) { _sponsorAutoSkip.value = on; prefs.edit().putBoolean("sponsor_auto_skip", on).apply() }
+    fun setSponsorCategory(category: String, enabled: Boolean) {
+        val next = _sponsorCategories.value.toMutableSet().apply { if (enabled) add(category) else remove(category) }
+        _sponsorCategories.value = next
+        prefs.edit().putString("sponsor_categories", JSONArray(next.sorted()).toString()).apply()
+    }
     fun setAutoplayNext(on: Boolean) { _autoplay.value = on; prefs.edit().putBoolean("autoplay_next", on).apply() }
     fun setPipedServer(server: String) { _pipedServer.value = server.trim().trimEnd('/'); prefs.edit().putString("piped_server", _pipedServer.value).apply() }
     fun setPipedUser(user: String?) { _pipedUser.value = user?.trim()?.takeIf { it.isNotEmpty() }; prefs.edit().putString("piped_user", _pipedUser.value.orEmpty()).apply() }
@@ -138,6 +148,7 @@ class LocalStore(context: Context) {
         _subs.value = emptyList(); _history.value = emptyList(); _later.value = emptyList()
         _profile.value = ""; _searches.value = emptyList(); _prefHeight.value = 0
         _sponsorSkip.value = true; _autoplay.value = true
+        _sponsorAutoSkip.value = true; _sponsorCategories.value = DEFAULT_SPONSOR_CATEGORIES
         _pipedServer.value = "https://pipedapi.adminforge.de"; _pipedUser.value = null
         positions.keys().asSequence().toList().forEach { positions.remove(it) }
     }
@@ -164,6 +175,11 @@ class LocalStore(context: Context) {
     private fun saveChannels(key: String, list: List<ChannelItem>) =
         prefs.edit().putString(key, JSONArray(list.map { it.toJson() }).toString()).apply()
 
+    private fun loadSponsorCategories(): Set<String> = runCatching {
+        val json = JSONArray(prefs.getString("sponsor_categories", null) ?: return@runCatching DEFAULT_SPONSOR_CATEGORIES)
+        (0 until json.length()).mapNotNull { json.optString(it).takeIf(String::isNotBlank) }.toSet()
+    }.getOrDefault(DEFAULT_SPONSOR_CATEGORIES)
+
     private fun loadStrings(key: String): List<String> = runCatching {
         val a = JSONArray(prefs.getString(key, "[]"))
         (0 until a.length()).mapNotNull { index ->
@@ -174,5 +190,8 @@ class LocalStore(context: Context) {
     private fun saveStrings(key: String, list: List<String>) =
         prefs.edit().putString(key, JSONArray(list).toString()).apply()
 
-    private companion object { const val MAX_SAVED_POSITIONS = 300; const val MAX_SAVED_VIDEOS = 300 }
+    private companion object {
+        const val MAX_SAVED_POSITIONS = 300; const val MAX_SAVED_VIDEOS = 300
+        val DEFAULT_SPONSOR_CATEGORIES = setOf("sponsor", "selfpromo", "interaction", "intro", "outro", "preview", "music_offtopic")
+    }
 }
