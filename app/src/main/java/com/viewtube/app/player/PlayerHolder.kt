@@ -19,6 +19,7 @@ import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import com.viewtube.app.data.Graph
 import com.viewtube.app.data.SponsorBlock
+import com.viewtube.app.data.SponsorSkipPolicy
 import com.viewtube.app.data.VideoDetails
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -332,10 +333,7 @@ object PlayerHolder {
                 suppressedSegment?.let { suppressed ->
                     if (pos < suppressed.startMs - 1_000 || pos >= suppressed.endMs) suppressedSegment = null
                 }
-                val seg = segments.firstOrNull {
-                    it.category in Graph.store.sponsorCategories.value &&
-                        pos >= it.startMs && pos < it.endMs - 350
-                }
+                val seg = SponsorSkipPolicy.findAt(segments, pos, Graph.store.sponsorCategories.value)
                 if (seg == null) {
                     _pendingSegment.value = null
                     if (lastAutoSkipKey != null && segments.none { segmentKey(it) == lastAutoSkipKey && pos in it.startMs until it.endMs }) {
@@ -371,7 +369,7 @@ object PlayerHolder {
         }
     }
 
-    private fun segmentKey(segment: SponsorBlock.Segment) = "${segment.category}:${segment.startMs}:${segment.endMs}"
+    private fun segmentKey(segment: SponsorBlock.Segment) = SponsorSkipPolicy.key(segment)
 
     fun skipPendingSegment() {
         val seg = _pendingSegment.value ?: return
