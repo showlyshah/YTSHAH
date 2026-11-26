@@ -78,8 +78,15 @@ object PlayerHolder {
 
     private val _skipNotice = MutableStateFlow<String?>(null)
     val skipNotice: StateFlow<String?> = _skipNotice.asStateFlow()
+    private val _pendingSegment = MutableStateFlow<SponsorBlock.Segment?>(null)
+    val pendingSegment: StateFlow<SponsorBlock.Segment?> = _pendingSegment.asStateFlow()
+    private val _undoAvailable = MutableStateFlow(false)
+    val undoAvailable: StateFlow<Boolean> = _undoAvailable.asStateFlow()
 
     private var segments: List<SponsorBlock.Segment> = emptyList()
+    private var lastSkippedSegment: SponsorBlock.Segment? = null
+    private var suppressedSegment: SponsorBlock.Segment? = null
+    private var lastAutoSkipKey: String? = null
     private var watcher: Job? = null
     private var saver: Job? = null
     private var segmentJob: Job? = null
@@ -284,6 +291,11 @@ object PlayerHolder {
         _audioBitrate.value = 0
         _audioOnly.value = false
         _skipNotice.value = null
+        _pendingSegment.value = null
+        _undoAvailable.value = false
+        lastSkippedSegment = null
+        suppressedSegment = null
+        lastAutoSkipKey = null
         _playing.value = false
         segments = emptyList()
         runCatching { appContext.stopService(Intent(appContext, PlaybackService::class.java)) }
@@ -311,13 +323,43 @@ object PlayerHolder {
         watcher?.cancel()
         watcher = scope.launch {
             while (true) {
-                delay(400)
-                if (!Graph.store.sponsorSkip.value || !player.isPlaying) continue
+                delay(350)
+                if (!Graph.store.sponsorSkip.value || !player.isPlaying) {
+                    _pendingSegment.value = null
+                    continue
+                }
                 val pos = player.currentPosition
-                val seg = segments.firstOrNull { pos >= it.startMs && pos < it.endMs - 500 } ?: continue
-                player.seekTo(seg.endMs)
-                _skipNotice.value = "Skipped ${label(seg.category)}"
-                scope.launch { delay(2500); _skipNotice.value = null }
+                suppressedSegment?.let { suppressed ->
+                    if (pos < suppressed.startMs - 1_000 || pos >= suppressed.endMs) suppressedSegment = null
+                }
+                val seg = segments.firstOrNull {
+                    it.category in Graph.store.sponsorCategories.value &&
+                        pos >= it.startMs && pos < it.endMs - 350
+                }
+                if (seg == null) {
+                    _pendingSegment.value = null
+                    if (lastAutoSkipKey != null && segments.none { segmentKey(it) == lastAutoSkipKey && pos in it.startMs until it.endMs }) {
+                        lastAutoSkipKey = null
+                    }
+                    continue
+                }
+                if (suppressedSegment == seg) {
+                    _pendingSegment.value = null
+                    continue
+                }
+                if (Graph.store.sponsorAutoSkip.value) {
+                    _pendingSegment.value = null
+                    val key = segmentKey(seg)
+                    if (lastAutoSkipKey == key) continue
+                    lastAutoSkipKey = key
+                    lastSkippedSegment = seg
+                    _undoAvailable.value = true
+                    player.seekTo(seg.endMs)
+                    _skipNotice.value = "Skipped ${label(seg.category)}"
+                    scope.launch { delay(2500); if (_skipNotice.value == "Skipped ${label(seg.category)}") _skipNotice.value = null }
+                } else {
+                    _pendingSegment.value = seg
+                }
             }
         }
         saver?.cancel()
@@ -327,6 +369,27 @@ object PlayerHolder {
                 saveProgress()
             }
         }
+    }
+
+    private fun segmentKey(segment: SponsorBlock.Segment) = "${segment.category}:${segment.startMs}:${segment.endMs}"
+
+    fun skipPendingSegment() {
+        val seg = _pendingSegment.value ?: return
+        player.seekTo(seg.endMs)
+        lastSkippedSegment = seg
+        _undoAvailable.value = true
+        _pendingSegment.value = null
+        _skipNotice.value = "Skipped ${label(seg.category)}"
+    }
+
+    fun undoLastSkip() {
+        val seg = lastSkippedSegment ?: return
+        suppressedSegment = seg
+        lastSkippedSegment = null
+        _undoAvailable.value = false
+        _pendingSegment.value = null
+        player.seekTo(seg.startMs)
+        _skipNotice.value = "Skip undone"
     }
 
     private fun label(category: String) = when (category) {
