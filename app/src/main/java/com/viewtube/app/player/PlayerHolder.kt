@@ -91,6 +91,7 @@ object PlayerHolder {
     private var watcher: Job? = null
     private var saver: Job? = null
     private var segmentJob: Job? = null
+    private var segmentLoadedForVideoId: String? = null
 
     fun init(context: Context) {
         appContext = context.applicationContext
@@ -313,7 +314,9 @@ object PlayerHolder {
     private fun loadSegments(id: String) {
         segmentJob?.cancel()
         segments = emptyList()
+        segmentLoadedForVideoId = null
         if (!Graph.store.sponsorSkip.value) return
+        segmentLoadedForVideoId = id
         segmentJob = scope.launch {
             val loaded = Graph.sponsor.segments(id)
             if (_current.value?.video?.id == id) segments = loaded
@@ -329,6 +332,8 @@ object PlayerHolder {
                     _pendingSegment.value = null
                     continue
                 }
+                val currentId = _current.value?.video?.id
+                if (currentId != null && segmentLoadedForVideoId != currentId) loadSegments(currentId)
                 val pos = player.currentPosition
                 suppressedSegment?.let { suppressed ->
                     if (pos < suppressed.startMs - 1_000 || pos >= suppressed.endMs) suppressedSegment = null
