@@ -226,7 +226,15 @@ object PlayerHolder {
         _audioTrack.value = audioTrackId
         val same = _current.value?.video?.id == d.video.id
         val resumeAt = if (same && startMs == 0L) player.currentPosition else startMs
-        if (!same) saveProgress()
+        if (!same) {
+            saveProgress()
+            _skipNotice.value = null
+            _pendingSegment.value = null
+            _undoAvailable.value = false
+            lastSkippedSegment = null
+            suppressedSegment = null
+            lastAutoSkipKey = null
+        }
 
         val meta = MediaMetadata.Builder()
             .setTitle(d.video.title)
