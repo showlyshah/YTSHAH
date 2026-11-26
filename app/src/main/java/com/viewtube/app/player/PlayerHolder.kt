@@ -92,6 +92,7 @@ object PlayerHolder {
     private var saver: Job? = null
     private var segmentJob: Job? = null
     private var segmentLoadedForVideoId: String? = null
+    private var noticeJob: Job? = null
 
     fun init(context: Context) {
         appContext = context.applicationContext
@@ -229,6 +230,7 @@ object PlayerHolder {
         if (!same) {
             saveProgress()
             _skipNotice.value = null
+            noticeJob?.cancel()
             _pendingSegment.value = null
             _undoAvailable.value = false
             lastSkippedSegment = null
@@ -288,7 +290,7 @@ object PlayerHolder {
 
     fun stop() {
         saveProgress()
-        watcher?.cancel(); saver?.cancel(); segmentJob?.cancel(); segmentJob = null
+        watcher?.cancel(); saver?.cancel(); segmentJob?.cancel(); segmentJob = null; noticeJob?.cancel()
         // stop() alone does not clear playWhenReady; some controllers can therefore
         // keep presenting the session as active. Pause first, then clear the media item.
         player.pause()
@@ -366,8 +368,7 @@ object PlayerHolder {
                     lastSkippedSegment = seg
                     _undoAvailable.value = true
                     player.seekTo(seg.endMs)
-                    _skipNotice.value = "Skipped ${label(seg.category)}"
-                    scope.launch { delay(2500); if (_skipNotice.value == "Skipped ${label(seg.category)}") _skipNotice.value = null }
+                    showSkipNotice("Skipped ${label(seg.category)}")
                 } else {
                     _pendingSegment.value = seg
                 }
@@ -390,7 +391,7 @@ object PlayerHolder {
         lastSkippedSegment = seg
         _undoAvailable.value = true
         _pendingSegment.value = null
-        _skipNotice.value = "Skipped ${label(seg.category)}"
+        showSkipNotice("Skipped ${label(seg.category)}")
     }
 
     fun undoLastSkip() {
@@ -400,7 +401,16 @@ object PlayerHolder {
         _undoAvailable.value = false
         _pendingSegment.value = null
         player.seekTo(seg.startMs)
-        _skipNotice.value = "Skip undone"
+        showSkipNotice("Skip undone")
+    }
+
+    private fun showSkipNotice(message: String) {
+        _skipNotice.value = message
+        noticeJob?.cancel()
+        noticeJob = scope.launch {
+            delay(2_500)
+            if (_skipNotice.value == message) _skipNotice.value = null
+        }
     }
 
     private fun label(category: String) = when (category) {
